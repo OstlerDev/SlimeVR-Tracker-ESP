@@ -80,14 +80,29 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 		// .deviceId = 0x15, // adsel high
 
 		.whoAmIReg = 0x00,
-		.expectedWhoAmI = 0x33, // there are two stupid dummy bytes at the start... need to add handling for that.
-		.dummyBytes = 2,
+		.expectedWhoAmI = 0x33,
+		.dummyBytes = 2, // always returns 2 dummy bytes to be discarded before good data is provided.
 
 		.dataWidth = MagDataWidth::NineByte,
 		.dataReg = 0x31, // data starts at 0x31
 
 		.setup =
 			[](MagInterface& interface) {
+				// mirrors Bosch driver
+				// soft reset
+				interface.writeByte(0x7E, 0xB6); // CMD, CMD_SOFTRESET
+				delay(24);
+				interface.writeByte(0x50, 0x80); // OTP_CMD_REG, PWR_OFF_OTP
+				// reset mag
+				interface.writeByte(0x06, 0x00); // PMU_CMD, PMU_CMD_SUS (suspend)
+				interface.writeByte(0x06, 0x07); // PMU_CMD, PMU_CMD_BR (bit reset)
+				interface.writeByte(0x06, 0x05); // PMU_CMD, PMU_CMD_FGR (flux guide reset)
+				// set interrupt mode 
+				interface.writeByte(0x2E, 0b10000110); // INT_CTRL, (mag data ready, push-pull, polarity active high)
+				// enable all axies
+				interface.writeByte(0x05, 0b00000111); // PMU_CMD_AXIS_EN, (en_z, en_y, en_x)
+				// TODO:
+				// read OTP calibration data from chip, save calibration for later use (bmm3_read_otp_word(), bmm3_parse_compensation(), bmm3_update_odr());
 				return true;
 			},
 	},
@@ -98,10 +113,9 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 		interface.setDeviceId(mag.deviceId);
 		interface.setDummyBytes(mag.dummyBytes);
 
-		logger.info("Trying mag %s!", mag.name);
+		logger.info("Trying mag: %s", mag.name);
 
 		uint8_t whoAmI = interface.readByte(mag.whoAmIReg);
-		logger.debug("mag whoAmI response: %d", whoAmI);
 		if (whoAmI != mag.expectedWhoAmI) {
 			continue;
 		}
@@ -111,16 +125,21 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 			return false;
 		}
 
-		logger.info("Found mag %s! Initializing", mag.name);
+		logger.info("Found mag %s! Initializing...", mag.name);
 
 		if (!mag.setup(interface)) {
 			logger.error("Mag %s failed to initialize!", mag.name);
 			return false;
 		}
+		logger.info("Initialized mag %s!", mag.name);
 
 		detectedMag = mag;
 
 		break;
+	}
+
+	if (!detectedMag.has_value()) {
+		logger.info("No mag detected.");
 	}
 
 	this->interface = interface;

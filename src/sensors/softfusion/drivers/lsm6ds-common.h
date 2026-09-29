@@ -57,6 +57,7 @@ struct LSM6DSOutputHandler {
 			static constexpr uint8_t reg = 0x14; // MASTER_CONFIG
 			static constexpr uint8_t clear = (0b00000000);
 			static constexpr uint8_t reset = (0b10000000); // RST_MASTER_REGS
+			static constexpr uint8_t writeOnce = (0b01000000); // WRITE_ONCE
 			static constexpr uint8_t passthrough = (0b00010000); // PASS_THROUGH_MODE
 			static constexpr uint8_t masterOn = (0b00000100); // MASTER_ON
 		};
@@ -72,6 +73,9 @@ struct LSM6DSOutputHandler {
 		struct SHUBSlv0Config {
 			static constexpr uint8_t reg = (0x17); // SLV0_CONFIG
 			static constexpr uint8_t value = (0b10100000); // 240hz
+		};
+		struct SHUBSlv0Datawrite {
+			static constexpr uint8_t reg = (0x21); // DATAWRITE_SLV0
 		};
 		struct SHUBOut1 {
 			static constexpr uint8_t reg = (0x02); // SENSOR_HUB_1
@@ -168,8 +172,36 @@ struct LSM6DSOutputHandler {
 
 	// blocking i2c passthrough write
 	void writeAux(uint8_t address, uint8_t value) {
+		// readAux(address); // check value before change
 		setupAux(address, true);
-		// TODO:
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub
+		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Config::reg, BaseRegs::SHUBSlv0Config::value);
+		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Datawrite::reg, value); // set data to write
+		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::masterOn | BaseRegs::SHUBMasterConfig::writeOnce);
+		delay(50);
+		uint8_t shub_status = m_RegisterInterface.readReg(BaseRegs::SHUBStatus::reg);
+		bool err = false;
+		if (shub_status & 0b00001000) { // verify SLAVE0_NACK
+			m_Logger.debug("Sensor Hub SLV0 NACK!");
+			err = true;
+		}
+		if (!(shub_status & 0b10000000)) { // verify WR_ONCE_DONE
+			m_Logger.debug("Sensor Hub SLV0 did not set WR_ONCE_DONE");
+			err = true;
+		}
+		if (!(shub_status & 0b00000001)) { // verify SENS_HUB_ENDOP
+			m_Logger.debug("Sensor Hub SLV0 did not set SENS_HUB_ENDOP");
+			err = true;
+		}
+		if (err){
+			m_Logger.debug("Error during writeAux (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
+		}
+		if (!err) {
+			m_Logger.debug("Sensor Hub SLV0 successfully wrote to aux device (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
+			// readAux(address); // check value after set
+		}
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
+		return;
 	}
 
 	uint8_t readAux(uint8_t address) {
@@ -179,12 +211,12 @@ struct LSM6DSOutputHandler {
 		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::masterOn); // turn on sensor hub i2c master
 		delay(50);
 		uint8_t shub_status = m_RegisterInterface.readReg(BaseRegs::SHUBStatus::reg);
-		m_Logger.debug("shub_status: %d", shub_status);
 		if (shub_status & 0b00001000) { // verify SLAVE0_NACK
-			m_Logger.debug("Sensor Hub SLV0 NACK (did not receive a response)!");
+			m_Logger.debug("Sensor Hub SLV0 NACK! (auxDevice: 0x%x) (addr: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, shub_status);
 			return 0;
 		}
 		uint8_t sensor_hub_res = m_RegisterInterface.readReg(BaseRegs::SHUBOut1::reg + auxDeviceDummyBytes); // offset read by dummy bytes
+		m_Logger.debug("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, sensor_hub_res, shub_status);
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
 		return sensor_hub_res;
 	}
