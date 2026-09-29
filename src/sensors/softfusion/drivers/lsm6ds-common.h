@@ -44,6 +44,10 @@ struct LSM6DSOutputHandler {
 	SlimeVR::Logging::Logger& m_Logger;
 
 	struct BaseRegs {
+		struct IFCFG {
+			static constexpr uint8_t reg = 0x03; // IF_CFG
+			static constexpr uint8_t value = (0b01011000); // SHUB_PU_EN (pullup i2c), H_LACTIVE (int active low), PP_OD (int open drain)
+		};
 		struct CFGAccess {
 			static constexpr uint8_t reg = 0x01; // FUNC_CFG_ACCESS
 			static constexpr uint8_t main = (0b00000000); // default / main register bank
@@ -149,6 +153,8 @@ struct LSM6DSOutputHandler {
 
 	// Setup SensorHub SLV0
 	void setupAux(uint8_t address, bool writeMode) {
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main);
+		m_RegisterInterface.writeReg(BaseRegs::IFCFG::reg, BaseRegs::IFCFG::value); // pullup i2c master & setup int pin
 		// reset sensor hub
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // switch to sensor hub regs
 		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::reset); // trigger reset
