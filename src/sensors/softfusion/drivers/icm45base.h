@@ -366,6 +366,10 @@ struct ICM45Base {
 		writeBankRegister<typename BaseRegs::I2CMDevProfile1>(deviceId);
 	}
 
+	void setAuxDummyBytes(int dummyBytes) {
+		// TODO:
+	}
+
 	uint8_t readAux(uint8_t address) {
 		writeBankRegister<typename BaseRegs::I2CMDevProfile0>(address);
 

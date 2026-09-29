@@ -40,6 +40,7 @@ struct MagInterface {
 	std::function<uint8_t(uint8_t)> readByte;
 	std::function<void(uint8_t, uint8_t)> writeByte;
 	std::function<void(uint8_t)> setDeviceId;
+	std::function<void(uint8_t)> setDummyBytes;
 	std::function<void(uint8_t, MagDataWidth)> startPolling;
 	std::function<void()> stopPolling;
 };
@@ -51,6 +52,8 @@ struct MagDefinition {
 
 	uint8_t whoAmIReg;
 	uint8_t expectedWhoAmI;
+
+	int dummyBytes;
 
 	MagDataWidth dataWidth;
 	uint8_t dataReg;

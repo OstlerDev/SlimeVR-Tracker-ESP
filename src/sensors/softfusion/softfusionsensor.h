@@ -331,6 +331,9 @@ public:
 
 		calibrator.checkStartupCalibration();
 
+		m_Logger.debug("Consts::SupportsMags: %d", Consts::SupportsMags);
+		m_Logger.debug("toggles.getToggle(SensorToggles::MagEnabled): %d", toggles.getToggle(SensorToggles::MagEnabled));
+
 		if constexpr (Consts::SupportsMags) {
 			magDriver.init(
 				SoftFusion::MagInterface{
@@ -339,6 +342,8 @@ public:
 					.writeByte = [&](uint8_t address, uint8_t value) {},
 					.setDeviceId
 					= [&](uint8_t deviceId) { m_sensor.setAuxId(deviceId); },
+					.setDummyBytes
+					= [&](int dummyBytes) { m_sensor.setAuxDummyBytes(dummyBytes); },
 					.startPolling
 					= [&](uint8_t dataReg, SoftFusion::MagDataWidth dataWidth
 					  ) { m_sensor.startAuxPolling(dataReg, dataWidth); },

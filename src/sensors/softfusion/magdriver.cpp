@@ -33,6 +33,7 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 
 		.whoAmIReg = 0x00,
 		.expectedWhoAmI = 0x90,
+		.dummyBytes = 0,
 
 		.dataWidth = MagDataWidth::SixByte,
 		.dataReg = 0x01,
@@ -57,6 +58,7 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 
 		.whoAmIReg = 0x00,
 		.expectedWhoAmI = 0x06,
+		.dummyBytes = 0,
 
 		.dataWidth = MagDataWidth::SixByte,
 		.dataReg = 0x11,
@@ -71,15 +73,35 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 				return true;
 			},
 	},
+	MagDefinition{
+		.name = "BMM350",
+
+		.deviceId = 0x14, // adsel low
+		// .deviceId = 0x15, // adsel high
+
+		.whoAmIReg = 0x00,
+		.expectedWhoAmI = 0x33, // there are two stupid dummy bytes at the start... need to add handling for that.
+		.dummyBytes = 2,
+
+		.dataWidth = MagDataWidth::NineByte,
+		.dataReg = 0x31, // data starts at 0x31
+
+		.setup =
+			[](MagInterface& interface) {
+				return true;
+			},
+	},
 };
 
 bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 	for (auto& mag : supportedMags) {
 		interface.setDeviceId(mag.deviceId);
+		interface.setDummyBytes(mag.dummyBytes);
 
 		logger.info("Trying mag %s!", mag.name);
 
 		uint8_t whoAmI = interface.readByte(mag.whoAmIReg);
+		logger.debug("mag whoAmI response: %d", whoAmI);
 		if (whoAmI != mag.expectedWhoAmI) {
 			continue;
 		}
