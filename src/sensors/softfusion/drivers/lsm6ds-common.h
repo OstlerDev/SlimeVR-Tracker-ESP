@@ -205,6 +205,13 @@ struct LSM6DSOutputHandler {
 	}
 
 	uint8_t readAux(uint8_t address) {
+		uint8_t buffer = 0;
+		readAux(address, 1, &buffer);
+		m_Logger.debug("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x)", auxDeviceId, address, buffer);
+		return buffer;
+	}
+
+	void readAux(uint8_t address, uint8_t size, uint8_t* buffer) {
 		setupAux(address, false);
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub
 		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Config::reg, BaseRegs::SHUBSlv0Config::value | (0x01 + auxDeviceDummyBytes)); // read 1 byte + dummy bytes.
@@ -213,12 +220,13 @@ struct LSM6DSOutputHandler {
 		uint8_t shub_status = m_RegisterInterface.readReg(BaseRegs::SHUBStatus::reg);
 		if (shub_status & 0b00001000) { // verify SLAVE0_NACK
 			m_Logger.debug("Sensor Hub SLV0 NACK! (auxDevice: 0x%x) (addr: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, shub_status);
-			return 0;
+			return;
 		}
-		uint8_t sensor_hub_res = m_RegisterInterface.readReg(BaseRegs::SHUBOut1::reg + auxDeviceDummyBytes); // offset read by dummy bytes
-		m_Logger.debug("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, sensor_hub_res, shub_status);
+		m_Logger.debug("SensorHub Status: 0x%x", shub_status);
+		// read into buffer
+		m_RegisterInterface.readBytes(BaseRegs::SHUBOut1::reg + auxDeviceDummyBytes, size, buffer); // offset read by dummy bytes
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
-		return sensor_hub_res;
+		return;
 	}
 
 	void startAuxPolling(uint8_t dataReg, MagDataWidth dataWidth) {
