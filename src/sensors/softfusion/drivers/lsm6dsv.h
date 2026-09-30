@@ -136,6 +136,7 @@ struct LSM6DSV : LSM6DSOutputHandler {
 			std::move(callbacks),
 			GyrTs,
 			AccTs,
+			MagTs,
 			TempTs
 		);
 	}

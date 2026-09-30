@@ -31,4 +31,5 @@ struct DriverCallbacks {
 	std::function<void(const SampleType sample[3], float AccTs)> processAccelSample;
 	std::function<void(const SampleType sample[3], float GyrTs)> processGyroSample;
 	std::function<void(int16_t sample, float TempTs)> processTempSample;
+	std::function<void(uint8_t* sample, float Magts)> processMagSample;
 };

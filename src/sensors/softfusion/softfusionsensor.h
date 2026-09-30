@@ -150,6 +150,12 @@ class SoftFusionSensor : public Sensor {
 		}
 	}
 
+	void processMagSample(const uint8_t* sample, const sensor_real_t timeDelta) {
+		float scaledSample[3];
+		magDriver.scaleMagSample(sample, scaledSample);
+		m_fusion.updateMag(scaledSample);
+	}
+
 public:
 	static constexpr auto TypeID = SensorType::Type;
 	static constexpr uint8_t Address = SensorType::Address;
@@ -251,6 +257,7 @@ public:
 				[&](int16_t sample, float TempTs) {
 					processTempSample(sample, TempTs);
 				},
+				[&](uint8_t* sample, float MagTs) { processMagSample(sample, MagTs); },
 			});
 			if (overwhelmed) {
 				calibrator.signalOverwhelmed();

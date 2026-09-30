@@ -50,6 +50,8 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 				);  // LP filter 2, 8x Oversampling, normal mode
 				return true;
 			},
+
+		.resolution = 0.025f,
 	},
 	MagDefinition{
 		.name = "IST8306",
@@ -72,6 +74,8 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 				interface.writeByte(0x31, 0x02);  // Continuous measurement @ 10Hz
 				return true;
 			},
+
+		.resolution = 0.3,
 	},
 	MagDefinition{
 		.name = "BMM350",
@@ -105,6 +109,8 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 				// read OTP calibration data from chip, save calibration for later use (bmm3_read_otp_word(), bmm3_parse_compensation(), bmm3_update_odr());
 				return true;
 			},
+
+		.resolution = 1,
 	},
 };
 
@@ -162,6 +168,37 @@ void MagDriver::stopPolling() const {
 	interface.stopPolling();
 }
 
+void MagDriver::scaleMagSample(const uint8_t* magSample, float* scaled) const {
+#pragma pack(push, 1)
+	struct MagData6Byte {
+		int16_t x;
+		int16_t y;
+		int16_t z;
+	};
+	struct MagData9Byte {
+		int32_t x : 24;
+		int32_t y : 24;
+		int32_t z : 24;
+	};
+#pragma pack(pop)
+
+	if (!detectedMag) {
+		return;
+	}
+
+	if (detectedMag->dataWidth == MagDataWidth::SixByte) {
+		const auto* data = reinterpret_cast<const MagData6Byte*>(magSample);
+		scaled[0] = data->x * detectedMag->resolution;
+		scaled[1] = data->y * detectedMag->resolution;
+		scaled[2] = data->z * detectedMag->resolution;
+	} else {
+		const auto* data = reinterpret_cast<const MagData9Byte*>(magSample);
+		scaled[0] = data->x * detectedMag->resolution;
+		scaled[1] = data->y * detectedMag->resolution;
+		scaled[2] = data->z * detectedMag->resolution;
+	}
+}
+
 const char* MagDriver::getAttachedMagName() const {
 	if (!detectedMag) {
 		return nullptr;
@@ -169,5 +206,7 @@ const char* MagDriver::getAttachedMagName() const {
 
 	return detectedMag->name;
 }
+
+bool MagDriver::isMagAttached() const { return detectedMag.has_value(); }
 
 }  // namespace SlimeVR::Sensors::SoftFusion

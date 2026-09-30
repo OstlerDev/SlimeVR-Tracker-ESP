@@ -98,6 +98,7 @@ struct LSM6DSOutputHandler {
 		DriverCallbacks<int16_t>&& callbacks,
 		float GyrTs,
 		float AccTs,
+		float MagTs,
 		float TempTs
 	) {
 		constexpr auto FIFO_SAMPLES_MASK = 0x3ff;
