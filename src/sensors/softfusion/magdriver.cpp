@@ -97,20 +97,29 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 				interface.writeByte(0x7E, 0xB6); // CMD, CMD_SOFTRESET
 				delay(24);
 				interface.writeByte(0x50, 0x80); // OTP_CMD_REG, PWR_OFF_OTP
+				delay(2);
 				// reset mag
 				interface.writeByte(0x06, 0x00); // PMU_CMD, PMU_CMD_SUS (suspend)
+				delay(2);
 				interface.writeByte(0x06, 0x07); // PMU_CMD, PMU_CMD_BR (bit reset)
+				delay(12);
 				interface.writeByte(0x06, 0x05); // PMU_CMD, PMU_CMD_FGR (flux guide reset)
+				delay(12);
 				// set interrupt mode 
 				interface.writeByte(0x2E, 0b10000110); // INT_CTRL, (mag data ready, push-pull, polarity active high)
+				// set data rate to 100hz "low noise" (highest data rate allowed for 4 sample averaging)
+				interface.writeByte(0x04, 0b00100100); // PMU_CMD_AGGR_SET, odr_100hz, avg 4 samples
 				// enable all axies
 				interface.writeByte(0x05, 0b00000111); // PMU_CMD_AXIS_EN, (en_z, en_y, en_x)
+				delay(2);
+				interface.writeByte(0x06, 0x01); // PMU_CMD, PMU_CMD_NM (switch back to normal mode)
+				delay(12);
 				// TODO:
 				// read OTP calibration data from chip, save calibration for later use (bmm3_read_otp_word(), bmm3_parse_compensation(), bmm3_update_odr());
 				return true;
 			},
 
-		.resolution = 1,
+		.resolution = 0.007f,
 	},
 };
 

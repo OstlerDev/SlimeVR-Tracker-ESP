@@ -27,7 +27,9 @@
 #include <array>
 #include <cstdint>
 
+#include "I2CDev.h"
 #include "../../../sensorinterface/RegisterInterface.h"
+#include "../magdriver.h"
 #include "callbacks.h"
 
 namespace SlimeVR::Sensors::SoftFusion::Drivers {
@@ -72,7 +74,8 @@ struct LSM6DSOutputHandler {
 		};
 		struct SHUBSlv0Config {
 			static constexpr uint8_t reg = (0x17); // SLV0_CONFIG
-			static constexpr uint8_t value = (0b10100000); // 240hz
+			static constexpr uint8_t value = (0b10000000); // 120hz
+			static constexpr uint8_t enableFifo = (0b00001000); // enable fifo data batching (BATCH_EXT_SENS_0_EN)
 		};
 		struct SHUBSlv0Datawrite {
 			static constexpr uint8_t reg = (0x21); // DATAWRITE_SLV0
@@ -141,6 +144,27 @@ struct LSM6DSOutputHandler {
 				case 0x03:  // Temperature
 					callbacks.processTempSample(entry.xyz[0], TempTs);
 					break;
+				case 0x0e: // Sensor Hub Slave 0
+					if (magPollingEnabled && magDataWidth == MagDataWidth::SixByte) {
+						uint64_t now = millis();
+						if (now - lastMagPollMillis >= MagTs * 1000) {
+							callbacks.processMagSample(reinterpret_cast<uint8_t*>(entry.xyz), MagTs);
+							lastMagPollMillis = now;
+						}
+					}
+					break;
+			}
+		}
+		// nine byte mags do not fit in a single fifo entry and are processed differently
+		if (magPollingEnabled && magDataWidth == MagDataWidth::NineByte) {
+			uint64_t now = millis();
+			if (now - lastMagPollMillis >= MagTs * 1000) {
+				size_t dataSize = 9 + auxDeviceDummyBytes;
+				uint8_t auxSensorData[dataSize] = {0};
+				readAuxData(magDataReg, dataSize, auxSensorData);
+				// process sample after dummy byte offset
+				callbacks.processMagSample(&auxSensorData[auxDeviceDummyBytes], MagTs);
+				lastMagPollMillis = now;
 			}
 		}
 		return fifo_bytes > bytes_to_read;
@@ -230,12 +254,55 @@ struct LSM6DSOutputHandler {
 		return;
 	}
 
+	bool magPollingEnabled = false;
+	uint8_t magDataReg = 0x00;
+	MagDataWidth magDataWidth;
+	uint64_t lastMagPollMillis = 0;
 	void startAuxPolling(uint8_t dataReg, MagDataWidth dataWidth) {
-		// TODO:
+		magDataReg = dataReg;
+		magDataWidth = dataWidth;
+		lastMagPollMillis = millis();
+
+		if (dataWidth == MagDataWidth::SixByte) {
+			// process 6 byte mags in bulkRead fifo
+			setupAux(dataReg, false);
+			m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub regs
+			uint8_t magDataSize = 6; // does not support dummy bytes, max slave read is 7 bytes.
+			// configure and start reading
+			m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Config::reg, BaseRegs::SHUBSlv0Config::value | BaseRegs::SHUBSlv0Config::enableFifo | magDataSize);
+			m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::masterOn); // turn on sensor hub i2c master
+		}
+		else if (dataWidth == MagDataWidth::NineByte) {
+			// process 9 byte mags using direct i2c passthrough and readAuxData()
+			m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub regs
+			m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::reset); // trigger reset
+			m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::clear); // set back to 0 after reset
+			m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::passthrough); // turn on i2c passthrough
+		}
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
+		magPollingEnabled = true;
 	}
 
-	void stopAuxPolling() {
-		// TODO:
+	// used to read an aux data buffer directly from the sensor using i2c passthrough mode
+	void readAuxData(uint8_t reg, size_t length, uint8_t* buffer) {
+		// only allowed when polling is enabled and we are a 9 byte mag
+		// 6 byte mags use fifo batching
+		if (!magPollingEnabled || magDataWidth != MagDataWidth::NineByte) {
+			return;
+		}
+		bool success = I2Cdev::readBytes(auxDeviceId, reg, length, buffer);
+		if (!success) {
+			m_Logger.debug("Aux device read using i2c passthrough failed!");
+		}
+	}
+
+	void stopAuxPolling() { 
+		// reset sensor hub
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // switch to sensor hub regs
+		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::reset); // trigger reset
+		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::clear); // set back to 0 after reset
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
+		magPollingEnabled = false; 
 	}
 };
 
