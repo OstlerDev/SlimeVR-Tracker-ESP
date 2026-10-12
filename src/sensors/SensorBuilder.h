@@ -59,6 +59,7 @@
 #include "softfusion/drivers/lsm6dso.h"
 #include "softfusion/drivers/lsm6dsr.h"
 #include "softfusion/drivers/lsm6dsv.h"
+#include "softfusion/drivers/ism330bx.h"
 #include "softfusion/drivers/mpu6050.h"
 #include "softfusion/softfusionsensor.h"
 
@@ -89,6 +90,7 @@ using SoftFusionICM42688
 	= SoftFusionSensor<SoftFusion::Drivers::ICM42688, SFCALIBRATOR>;
 using SoftFusionBMI270 = SoftFusionSensor<SoftFusion::Drivers::BMI270, SFCALIBRATOR>;
 using SoftFusionLSM6DSV = SoftFusionSensor<SoftFusion::Drivers::LSM6DSV, SFCALIBRATOR>;
+using SoftFusionISM330BX = SoftFusionSensor<SoftFusion::Drivers::ISM330BX, SFCALIBRATOR>;
 using SoftFusionLSM6DSO = SoftFusionSensor<SoftFusion::Drivers::LSM6DSO, SFCALIBRATOR>;
 using SoftFusionLSM6DSR = SoftFusionSensor<SoftFusion::Drivers::LSM6DSR, SFCALIBRATOR>;
 using SoftFusionMPU6050 = SoftFusionSensor<SoftFusion::Drivers::MPU6050, SFCALIBRATOR>;
@@ -218,6 +220,7 @@ public:
 			// SoftFusionICM42688,
 			SoftFusionBMI270,
 			SoftFusionLSM6DSV,
+			SoftFusionISM330BX,
 			SoftFusionLSM6DSO,
 			SoftFusionLSM6DSR,
 			// SoftFusionMPU6050,

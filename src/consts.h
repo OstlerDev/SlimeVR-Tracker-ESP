@@ -46,6 +46,7 @@ enum class SensorTypeID : uint8_t {
 	ICM45686,
 	ICM45605,
 	ADC_RESISTANCE,
+	ISM330BX = 20,
 	Empty = 255
 };
 
@@ -64,6 +65,7 @@ enum class SensorTypeID : uint8_t {
 #define IMU_BMI270 SoftFusionBMI270
 #define IMU_LSM6DS3TRC SoftFusionLSM6DS3TRC
 #define IMU_LSM6DSV SoftFusionLSM6DSV
+#define IMU_ISM330BX SoftFusionISM330BX
 #define IMU_LSM6DSO SoftFusionLSM6DSO
 #define IMU_LSM6DSR SoftFusionLSM6DSR
 #define IMU_MPU6050_SF SoftFusionMPU6050

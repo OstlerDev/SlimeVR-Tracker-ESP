@@ -30,6 +30,7 @@
 				"IMU_BMI270",
 				"IMU_LSM6DS3TRC",
 				"IMU_LSM6DSV",
+				"IMU_ISM330BX",
 				"IMU_LSM6DSO",
 				"IMU_LSM6DSR",
 				"IMU_MPU6050_SF",
