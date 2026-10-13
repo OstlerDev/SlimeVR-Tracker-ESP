@@ -117,6 +117,7 @@ struct LSM6DSOutputHandler {
 			);
 		}
 
+		bool fifoMagRead = false;
 		std::array<uint8_t, FullFifoEntrySize * 8> read_buffer;  // max 8 readings
 		const auto bytes_to_read = std::min(
 									   static_cast<size_t>(read_buffer.size()),
@@ -146,6 +147,7 @@ struct LSM6DSOutputHandler {
 					break;
 				case 0x0e: // Sensor Hub Slave 0
 					if (magPollingEnabled && magDataWidth == MagDataWidth::SixByte) {
+						fifoMagRead = true;
 						uint64_t now = millis();
 						if (now - lastMagPollMillis >= MagTs * 1000) {
 							callbacks.processMagSample(reinterpret_cast<uint8_t*>(entry.xyz), MagTs);
@@ -155,11 +157,11 @@ struct LSM6DSOutputHandler {
 					break;
 			}
 		}
-		// nine byte mags do not fit in a single fifo entry and are processed differently
-		if (magPollingEnabled && magDataWidth == MagDataWidth::NineByte) {
+		// read directly from i2c if fifo did not have data (i.e. no sensor hub, or 9 byte mag)
+		if (magPollingEnabled && !fifoMagRead) {
 			uint64_t now = millis();
 			if (now - lastMagPollMillis >= MagTs * 1000) {
-				size_t dataSize = 9 + auxDeviceDummyBytes;
+				size_t dataSize = auxDeviceDummyBytes + (magDataWidth == MagDataWidth::NineByte ? 9 : 6);
 				uint8_t auxSensorData[dataSize] = {0};
 				readAuxData(magDataReg, dataSize, auxSensorData);
 				// process sample after dummy byte offset
@@ -195,7 +197,6 @@ struct LSM6DSOutputHandler {
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main);
 	}
 
-	// blocking i2c passthrough write
 	void writeAux(uint8_t address, uint8_t value) {
 		// readAux(address); // check value before change
 		setupAux(address, true);
@@ -285,14 +286,9 @@ struct LSM6DSOutputHandler {
 
 	// used to read an aux data buffer directly from the sensor using i2c passthrough mode
 	void readAuxData(uint8_t reg, size_t length, uint8_t* buffer) {
-		// only allowed when polling is enabled and we are a 9 byte mag
-		// 6 byte mags use fifo batching
-		if (!magPollingEnabled || magDataWidth != MagDataWidth::NineByte) {
-			return;
-		}
 		bool success = I2Cdev::readBytes(auxDeviceId, reg, length, buffer);
 		if (!success) {
-			m_Logger.debug("Aux device read using i2c passthrough failed!");
+			m_Logger.trace("Aux device read using i2c passthrough failed!");
 		}
 	}
 

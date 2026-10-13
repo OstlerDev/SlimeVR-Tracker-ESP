@@ -40,6 +40,30 @@ struct ISM330BX : LSM6DSV {
 
   using LSM6DSV::LSM6DSV;
 
+  // No sensor hub, so just use direct i2c bus access
+  void writeAux(uint8_t address, uint8_t value) {
+    bool success = I2Cdev::writeByte(auxDeviceId, address, value);
+    if (!success) {
+      m_Logger.trace("Aux device write using i2c direct failed!");
+    }
+    if (success) {
+      m_Logger.trace("Wrote to aux device (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x)", auxDeviceId, address, value);
+    }
+  }
+  uint8_t readAux(uint8_t address) {
+    uint8_t buffer = 0;
+    readAuxData(address, 1, &buffer);
+    m_Logger.trace("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x)", auxDeviceId, address, buffer);
+    return buffer;
+  }
+  void startAuxPolling(uint8_t dataReg, MagDataWidth dataWidth) {
+    magDataReg = dataReg;
+    magDataWidth = dataWidth;
+    lastMagPollMillis = millis();
+    magPollingEnabled = true;
+  }
+  void stopAuxPolling() {}
+
   bool bulkRead(DriverCallbacks<int16_t>&& cb) {
     DriverCallbacks<int16_t> callbacks = {
       .processAccelSample = [&](const auto sample[3], float AccTs) {

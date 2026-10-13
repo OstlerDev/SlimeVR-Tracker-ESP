@@ -40,14 +40,11 @@ std::vector<MagDefinition> MagDriver::supportedMags{
 
 		.setup =
 			[](MagInterface& interface) {
-				interface.writeByte(0x0b, 0x80);
-				interface.writeByte(0x0b, 0x00);  // Soft reset
+				interface.writeByte(0x0b, 0b10000000); // Soft reset on
+				interface.writeByte(0x0b, 0b00000000);  // Soft reset clear
 				delay(10);
-				interface.writeByte(0x0b, 0x48);  // Set/reset on, 8g full range, 200Hz
-				interface.writeByte(
-					0x0a,
-					0x21
-				);  // LP filter 2, 8x Oversampling, normal mode
+				interface.writeByte(0x0b, 0b01001000);  // 200Hz, 8g full range, Set/reset on
+				interface.writeByte(0x0a, 0b00100001);  // LP filter 2, 8x Oversampling, normal mode
 				return true;
 			},
 
