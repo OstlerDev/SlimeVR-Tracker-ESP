@@ -338,6 +338,11 @@ struct VQFState {
 	 */
 	vqf_real_t delta;
 	/**
+	 * The heading offset at the time of magnetometer enable
+	 */
+	vqf_real_t magStartupDelta;
+	bool setMagStartupDelta;
+	/**
 	 * @brief True if it has been detected that the IMU is currently at rest.
 	 *
 	 * Used to switch between rest and motion gyroscope bias estimation.

@@ -39,7 +39,7 @@ class MagnetoCalibration {
         /// samples are useful to collect, due to the limitations of finite-storage numbers.
         ///
         /// @param BAinv 
-        void current_calibration(float BAinv[4][3]);
+        void current_calibration(float BAinv[4][3], double* hm);
 
     private:
         // internal 10x10 matrix representing the 10x<sample count> matrix multiplied by its transpose,

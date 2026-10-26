@@ -174,7 +174,8 @@ void MagDriver::stopPolling() const {
 	interface.stopPolling();
 }
 
-void MagDriver::scaleMagSample(const uint8_t* magSample, float* scaled) const {
+int log = 0;
+void MagDriver::scaleMagSample(const uint8_t* magSample, float* scaled) {
 #pragma pack(push, 1)
 	struct MagData6Byte {
 		int16_t x;
@@ -203,6 +204,17 @@ void MagDriver::scaleMagSample(const uint8_t* magSample, float* scaled) const {
 		scaled[1] = data->y * detectedMag->resolution;
 		scaled[2] = data->z * detectedMag->resolution;
 	}
+
+	if (log % 5 == 0) {
+		// process the mag sample
+		calibrator.processMagSample(scaled);
+	}
+	calibrator.scaleMagSample(scaled);
+	if (log % 100 == 0) {
+		logger.trace("Mag Data: %f, %f, %f",scaled[0], scaled[1], scaled[2]);	
+		log = 0;
+	}
+	log++;
 }
 
 const char* MagDriver::getAttachedMagName() const {

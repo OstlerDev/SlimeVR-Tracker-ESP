@@ -75,6 +75,7 @@ public:
 				[](const RawSensorT xyz[3], const sensor_real_t timeDelta) {},
 				[](const RawSensorT xyz[3], const sensor_real_t timeDelta) {},
 				[](const int16_t xyz, const sensor_real_t timeDelta) {},
+				[](const uint8_t* raw, const sensor_real_t timeDelta) {},
 			});
 		}
 	}
@@ -84,6 +85,7 @@ public:
 	) {
 		RawVectorT accel = {0};
 		RawVectorT gyro = {0};
+		std::array<uint8_t, 9> mag = {0};
 		int16_t temp = 0;
 		const auto targetDelay = millis() + milliseconds;
 		while (millis() < targetDelay) {
@@ -100,6 +102,9 @@ public:
 				},
 				[&](const int16_t rawTemp, const sensor_real_t timeDelta) {
 					temp = rawTemp;
+				},
+				[&](const uint8_t* raw, const sensor_real_t timeDelta) {
+					memcpy(mag.data(), raw, sizeof(mag));
 				},
 			});
 			yield();

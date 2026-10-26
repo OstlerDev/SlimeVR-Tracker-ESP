@@ -365,6 +365,12 @@ void VQF::updateMag(const vqf_real_t mag[3])
     } else if (state.delta < vqf_real_t(-M_PI)) {
         state.delta += vqf_real_t(2*M_PI);
     }
+
+    if (!state.setMagStartupDelta) {
+        state.setMagStartupDelta = true;
+        state.magStartupDelta = state.delta;
+        state.kMagInit = 0;
+    }
 }
 
 void VQF::getQuat3D(vqf_real_t out[4]) const
@@ -380,7 +386,7 @@ void VQF::getQuat6D(vqf_real_t out[4]) const
 void VQF::getQuat9D(vqf_real_t out[4]) const
 {
     quatMultiply(state.accQuat, state.gyrQuat, out);
-    quatApplyDelta(out, state.delta, out);
+    quatApplyDelta(out, state.delta - state.magStartupDelta, out);
 }
 
 vqf_real_t VQF::getDelta() const

@@ -26,7 +26,7 @@ void MagnetoCalibration::sample(double x, double y, double z) {
     Multiply_Self_Transpose(ata, D, 10, 1);
 }
 
-void MagnetoCalibration::current_calibration(float BAinv[4][3]) {
+void MagnetoCalibration::current_calibration(float BAinv[4][3], double* hm) {
     double* S11 = new double[6 * 6];
     Get_Submatrix(S11, 6, 6, ata, 10, 0, 0);
     double* S12 = new double[6 * 4];
@@ -36,7 +36,7 @@ void MagnetoCalibration::current_calibration(float BAinv[4][3]) {
     double* S22 = new double[4 * 4];
     Get_Submatrix(S22, 4, 4, ata, 10, 6, 6);
 
-    double hm = norm_sum / sample_count;
+    *hm = norm_sum / sample_count;
 
     // this is where we'd deallocate ata or the entire calibration class
     // if we decided to compute the calibration destructively
@@ -242,7 +242,7 @@ void MagnetoCalibration::current_calibration(float BAinv[4][3]) {
     double hmb = sqrt(btqb - J);
 
     for (int i = 0; i < 9; i++)
-        A_1[i] = SQ[i] * hm / hmb;
+        A_1[i] = SQ[i] * *hm / hmb;
     delete[] SQ;
 
     for (int i = 0; i < 3; i++)

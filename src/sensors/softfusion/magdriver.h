@@ -28,6 +28,7 @@
 
 #include "logging/Logger.h"
 #include "sensorinterface/RegisterInterface.h"
+#include "sensors/softfusion/runtimecalibration/MagCalibrator.h"
 
 namespace SlimeVR::Sensors::SoftFusion {
 
@@ -68,7 +69,7 @@ public:
 	bool init(MagInterface&& interface, bool supports9ByteMags);
 	void startPolling() const;
 	void stopPolling() const;
-	void scaleMagSample(const uint8_t* sample, float* scaled) const;
+	void scaleMagSample(const uint8_t* sample, float* scaled);
 	[[nodiscard]] const char* getAttachedMagName() const;
 
 	[[nodiscard]] bool isMagAttached() const;
@@ -76,6 +77,7 @@ public:
 private:
 	std::optional<MagDefinition> detectedMag;
 	MagInterface interface;
+	SlimeVR::Sensors::RuntimeCalibration::MagCalibrator calibrator{};
 
 	static std::vector<MagDefinition> supportedMags;
 

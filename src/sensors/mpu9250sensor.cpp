@@ -261,7 +261,8 @@ void MPU9250Sensor::startCalibration(int calibrationType) {
 	m_Logger.debug("Calculating calibration data...");
 
 	float M_BAinv[4][3];
-	magneto->current_calibration(M_BAinv);
+	double hm;
+	magneto->current_calibration(M_BAinv, &hm);
 	delete magneto;
 
 	m_Logger.debug("[INFO] Magnetometer calibration matrix:");
