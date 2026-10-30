@@ -236,6 +236,13 @@ public:
 	}
 
 	float getGyroTimestep() final { return calibration.G_Ts; }
+
+	void scaleMagSample(float* magSample) {
+		// @TODO: Apply magneto scaling if desired in the future, 
+		// for now only Runtime Calibration scales mag samples to 
+		// mag calibration matrix.
+	}
+	
 	float getMagTimestep() final { return calibration.M_Ts; }
 
 	float getTempTimestep() final { return calibration.T_Ts; }

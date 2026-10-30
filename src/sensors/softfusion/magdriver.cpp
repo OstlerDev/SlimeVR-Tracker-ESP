@@ -205,11 +205,6 @@ void MagDriver::scaleMagSample(const uint8_t* magSample, float* scaled) {
 		scaled[2] = data->z * detectedMag->resolution;
 	}
 
-	if (log % 5 == 0) {
-		// process the mag sample
-		calibrator.processMagSample(scaled);
-	}
-	calibrator.scaleMagSample(scaled);
 	if (log % 100 == 0) {
 		logger.trace("Mag Data: %f, %f, %f",scaled[0], scaled[1], scaled[2]);	
 		log = 0;

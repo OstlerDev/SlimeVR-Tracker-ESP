@@ -77,7 +77,6 @@ public:
 private:
 	std::optional<MagDefinition> detectedMag;
 	MagInterface interface;
-	SlimeVR::Sensors::RuntimeCalibration::MagCalibrator calibrator{};
 
 	static std::vector<MagDefinition> supportedMags;
 

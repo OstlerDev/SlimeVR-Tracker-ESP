@@ -77,6 +77,7 @@ public:
 
 	void updateBiasForgettingTime(float biasForgettingTime);
 
+	VQF* getVQF();
 	[[nodiscard]] bool getRestDetected() const;
 
 protected:

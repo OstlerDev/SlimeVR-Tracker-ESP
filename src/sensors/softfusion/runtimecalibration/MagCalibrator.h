@@ -24,149 +24,33 @@
 #pragma once
 
 #include "magneto1.4.h"
+#include "vqf.h"
 #include "logging/Logger.h"
 
-#define SAMPLES_TOTAL (32)
+#define SAMPLES_TOTAL (64)
 
 namespace SlimeVR::Sensors::RuntimeCalibration {
 
 class MagCalibrator {
 public:
-  void processMagSample(float* sample) {
-    // delay to start calibration
-    if (!startCalibration) {
-      return;
-    }
-
-    // test how well the new point fits the existing ellipsoid
-    float score;
-    float testSample[3] = {sample[0], sample[1], sample[2]};
-    scaleAndScore(&testSample[0], &score);
-    logger.trace("Sample Score: %f, Trust: %d, Frozen: %d", score, calibrationTrust, freeze);
-
-    if (freeze) {
-      return;
-    }
-
-    // first check if there are any still empty
-    int emptyIndex = getFirstEmpty();
-    float minDistance = getMinDistance(sample);
-    // when building the array require a spread sample.
-    if (minDistance < 10 && emptyIndex != -1) return;
-    if (emptyIndex != -1) {
-      minDist_vec[emptyIndex] = minDistance;
-      x_vec[emptyIndex] = sample[0];
-      y_vec[emptyIndex] = sample[1];
-      z_vec[emptyIndex] = sample[2];
-
-      recalculateDistances();
-      if (emptyIndex == SAMPLES_TOTAL-1) {
-        runMagneto();
-      }
-      return;
-    }
-
-    // DISABLE calibration trust resetting the array, just keep it around for now as a static value
-    // for monitoring purposes. It seemed to reset the data too often instead of allowing slow improvements
-    // it is likely better to calculate based on the percentage of the ellipsoid that has datapoints
-    // so that we know how much is left to "fill".
-    // Calibration trust was meant to track how well fit our ellipsoid was to the sphere, but it seemed to
-    // actually degrade the calibration by removing good datapoints from the array.
-    // In the future we should only change calibration trust when the mag is actually moving instead of
-    // changing trust when the mag is holding still.
-
-    // Maybe instead of just raw checking samples score against the current ellipsoid we should
-    // do a "test" of the new point to see if it improves the fit or if it makes the fit of the 
-    // ellipsoid worse by checking every points score against a "test" ellipsoid.
-    // We could have two ellipsoids that we keep in memory, one as the "active" and the second as the "test"
-    // that we use to update with a test sample, check fit, then if its bad, revert the change.
-    // This would help us validate things a little more maybe?
-
-    // toss out samples that don't fit, and lower trust score.
-    if ((score < 0.8 || score > 1.2) && improvementSamples > 60) {
-      if (calibrationTrust > 0) {
-        calibrationTrust--;
-      }
-      // disable trust based resets
-
-      // if trust drops too much, clear out array and start again from scratch
-      // if (calibrationTrust == 0) {
-      //   resetCalibration();
-      //   calibrationTrust = 500;
-      // }
-
-      return;
-    } else if ((score > 0.9 && score < 1.1) && improvementSamples > 60) {
-      if (calibrationTrust < 2500) {
-        calibrationTrust++;
-      }
-      // disable freeze for now...
-
-      // if (calibrationTrust > 2500) {
-      //   freeze = true;
-      // }
-    }
-
-    // if there are not any empty slots, check if we are better than the worst sample, if so, replace it.
-    int worstSample = getWorstSample();
-
-    if (minDistance > minDist_vec[worstSample] && !freeze) {
-        // logger.trace("Replacing current worst sample i:%d (%0.2f) for new sample (%0.2f)!", worstSample, minDist_vec[worstSample], minDistance);
-      // update least square accumulator
-        // leastSquareAccumulate(x_vec[worstSample], y_vec[worstSample], z_vec[worstSample], false); // remove old
-        // leastSquareAccumulate(sample[0], sample[1], sample[2], true); // add new
-      // replace the worst sample
-      minDist_vec[worstSample] = minDistance;
-      x_vec[worstSample] = sample[0];
-      y_vec[worstSample] = sample[1];
-      z_vec[worstSample] = sample[2];
-      if (minDistance>5) improvementSamples++; // only count improvements that have decent spread
-      // update the min distance for all points now that we have accepted a new point:
-      recalculateDistances();
-      // logger.trace("best points:");
-      // for (int i = 0; i < SAMPLES_TOTAL; i++){
-      //   logger.trace("    #%d - minDist: %0.2f, x: %0.1f, y: %0.1f, z: %0.1f", i, minDist_vec[i], x_vec[i], y_vec[i], z_vec[i]);
-      // }
-      // recalculate best sphere to use as hard-iron offset
-        // accumulateAll(); // rerun accumulator...
-        // bestSphereUpdate();
-      
-      // use magneto
-      runMagneto();
-
-      // find the worst fitting sample
-      // consider occasionally tossing out the worst fitting sample so that we can improve fit over time
-      // might backfire if the "bad fitting sample" is actually important to the best sphere fit.
-      float minScore = 1;
-      float runningScoreTotal = 0;
-      for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        float pointScore = 0;
-        float checkSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
-        scaleAndScore(checkSample, &pointScore);
-        runningScoreTotal += pointScore;
-
-        if (pointScore < minScore) {
-          minScore = pointScore;
-        }
-      }
-      runningScoreTotal = runningScoreTotal / SAMPLES_TOTAL;
-      logger.trace("New fit avg score: %0.4f | Min score: %0.4f", runningScoreTotal, minScore);
-    }
-  };
+  MagCalibrator(VQF* vqf) : fusion(vqf) {}
 
   bool freeze = false;
   void scaleMagSample(float* sample) {
+    logStatus();
+    provideMagSample(sample); // add to calibration if needed
+
+    if (!startCalibration || !calibrationReady) {
+      sample[0] = 0;
+      sample[1] = 0;
+      sample[2] = 0;
+      return;
+    }
+
     float score = 0;
     scaleAndScore(sample, &score);
     // logger.trace("Sample Score: %f, Trust: %d, Frozen: %d", score, calibrationTrust, freeze);
     // logger.trace("Sample Score: %f", score);
-    // if sample is a bad fit to our calibration, clear it so that we don't pass it to fusion.
-    /* CONSIDER PASSING ALL SAMPLES ONCE CALIBRATION IS HEALTHY (maybe spread >= 4000?) TO VQF FOR FUSION */
-    if (score < 0.95 || score > 1.05 || !startCalibration) {
-      sample[0] = 0;
-      sample[1] = 0;
-      sample[2] = 0;
-    }
 
     // if (improvementSamples < 50) {
     //   sample[0] = 0;
@@ -175,36 +59,12 @@ public:
     //   return;
     // }
   }
-  // scale with score
-  void scaleAndScore(float* sample, float* score) {
-    // logStatus(); // attempt to log whenever we are scaling a sample c:
-    // require minimum calibration before being ready to serve samples to vqf
-    // if (totalSpread < 10000 || improvementSamples < 200 || (radius < 98 || radius > 102)) {
-    
-    float mag_x = sample[0];
-    float mag_y = sample[1];
-    float mag_z = sample[2];
-    // apply hard iron
-    mag_x -= M_Bias[0];
-    mag_y -= M_Bias[1];
-    mag_z -= M_Bias[2];
 
-    // apply soft iron
-    float cx = M_Ainv[0][0] * mag_x + M_Ainv[0][1] * mag_y + M_Ainv[0][2] * mag_z;
-    float cy = M_Ainv[1][0] * mag_x + M_Ainv[1][1] * mag_y + M_Ainv[1][2] * mag_z;
-    float cz = M_Ainv[2][0] * mag_x + M_Ainv[2][1] * mag_y + M_Ainv[2][2] * mag_z;
-
-    float clength = sqrtf(cx * cx + cy * cy + cz * cz);
-    *score = clength / hm;
-
-    // logger.trace("Sample Score: %f", *score);
-
-    sample[0] = cx;
-    sample[1] = cy;
-    sample[2] = cz;
-  }
 private:
   Logging::Logger logger{"MagCalibrator"};
+  VQF* fusion; // reference to vqf for direct access
+
+  bool calibrationReady = false;
 
   uint64_t startTime = 0;
   bool startCalibration = false;
@@ -215,18 +75,18 @@ private:
       startTime = now;
     }
     // wait 2 minutes to collect datapoints
-    if (now - startTime > 60*2*1000) {
+    if (now - startTime > 60*0.2*1000) {
       startCalibration = true;
     }
-    // full log every 1 minute
-    if (now - lastLogTime > 60*1*1000) {
+    // full log every 30 seconds
+    if (now - lastLogTime > 60*0.5*1000) {
       lastLogTime = now;
-      logger.debug("Magneto1.4 calibration: (x: %0.2f, y: %0.2f, z: %0.2f, spread: %0.1f, improvement samples: %d)", M_Bias[0], M_Bias[1], M_Bias[2], getTotalSpread(), improvementSamples);
+      logger.debug("Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.1f, improvement samples: %d)", M_Bias[0], M_Bias[1], M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
       logger.debug("Magneto1.4 calibration matrix:");
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
-          "  [%f, %f, %f]",
+          "  [%f, %f, %f],",
           M_Ainv[0][i],
           M_Ainv[1][i],
           M_Ainv[2][i]
@@ -251,6 +111,8 @@ private:
   float z_vec[SAMPLES_TOTAL];
 
   float minDist_vec[SAMPLES_TOTAL];
+  float pointDeviation[SAMPLES_TOTAL];
+  float pointTrustScore[SAMPLES_TOTAL];
 
   void resetCalibration(){
     calibrationTrust = 100;
@@ -280,11 +142,11 @@ private:
   }
   // find the sample that is closest to another sample so that we can replace it.
   int getWorstSample(){
-    float currentWorst = minDist_vec[0];
+    float currentWorst = pointTrustScore[0];
     int worstSample = 0;
     for (int i = 1; i < SAMPLES_TOTAL; i++) {
-      if (minDist_vec[i] < currentWorst) {
-        currentWorst = minDist_vec[i];
+      if (pointTrustScore[i] < currentWorst) {
+        currentWorst = pointTrustScore[i];
         worstSample = i;
       }
     }
@@ -303,10 +165,15 @@ private:
     return minDistance;
   }
   // recalculate the min distance for all points
-  void recalculateDistances() { 
+  void recalculateTrustScores() { 
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
       float sample[3] = {x_vec[i], y_vec[i], z_vec[i]};
       minDist_vec[i] = getMinDistance(sample, i);
+
+      float score;
+      scaleAndScore(sample, &score);
+      pointDeviation[i] = score;
+      pointTrustScore[i] = calculateTrust(minDist_vec[i], score);
     }
   }
   float getTotalSpread(){
@@ -317,11 +184,237 @@ private:
     totalSpread = spread;
     return spread;
   }
+  float getErrorTotal(){
+    float totalError = 0;
+    for (int i = 0; i < SAMPLES_TOTAL; i++) {
+      float devScore = pointDeviation[i];
+      if (devScore < 1) {
+        totalError += (1-devScore);
+      } else {
+        totalError += (devScore-1);
+      }
+    }
+    return totalError;
+  }
   // calculates raw distance between 2 3d points
   float calculateDistance(float x1, float x2, float y1, float y2, float z1, float z2){
     return ((x1-x2)*(x1-x2)) + ((y1-y2)*(y1-y2)) + ((z1-z2)*(z1-z2));
   };
 
+  /**
+   * Handle creation of the calibration
+   */
+  const int sampleRate = 10; // consider changing to time based collection metric, also consider subsample averaging of all datapoints
+  int samplerDelay = 0;
+  double lastSampleTime;
+  bool vqfHasBeenHealthy = false;
+  void provideMagSample(float* sample) {
+    // delay to start calibration
+    if (!startCalibration) {
+      return;
+    }
+    // only collect a datapoint every X samples provided
+    samplerDelay++;
+    if (samplerDelay % sampleRate != 0) { return; }
+    samplerDelay = 0;
+
+    if (freeze) {
+      return;
+    }
+
+
+    // Ignore new samples if mag is disturbed
+    if (calibrationReady) {
+      const VQFState& vqfState = fusion->getState();
+      if (vqfState.magDistDetected && vqfState.kMagInit != 1) {
+        // Consider also tossing out any samples added to the array in the last 0.5 seconds
+        // in case any bad samples have snuck in before VQF could trigger mag disturbance rejections
+
+        // NOTE! Mag disturbance detection DOES NOT handle if a magnet is brought close by but doesn't change the
+        // angle. We /might/ still want some way to detect if the sensor readings spiked out of reasonable ranges.
+        // ignore provided sample
+        // only start ignoring once VQF has been undisturbed a single time
+        if (vqfHasBeenHealthy) {
+          logger.trace("VQF: Mag is Disturbed! Ignoring Sample... Disturbed duration: %0.1f", vqfState.magRejectT);
+          return;
+        } else {
+          logger.trace("VQF: Calibrating for the first time, Candidate time: %0.5f", vqfState.magCandidateT);
+        }
+      } else {
+        vqfHasBeenHealthy = true;
+        logger.trace("VQF: Mag is healthy :3! Healthy duration: %0.5f, lastMagDisAngle: %0.5f", vqfState.magUndisturbedT, (fusion->getState()).lastMagDisAngle);
+      }
+    }
+
+    // first check if there are any still empty
+    int emptyIndex = getFirstEmpty();
+    float minDistance = getMinDistance(sample);
+    // when building the array require a spread sample.
+    if (minDistance < 3 && emptyIndex != -1) return;
+    if (emptyIndex != -1) {
+      x_vec[emptyIndex] = sample[0];
+      y_vec[emptyIndex] = sample[1];
+      z_vec[emptyIndex] = sample[2];
+
+      logger.trace("Adding new datapoint to initial point cloud: %0.2f, %0.2f, %0.2f (dist: %0.2f)", sample[0], sample[1], sample[2], minDistance);
+
+      recalculateTrustScores(); // recalculates distance
+      if (emptyIndex == SAMPLES_TOTAL-1) {
+        runMagneto();
+      }
+      return;
+    }
+
+    // DISABLE calibration trust resetting the array, just keep it around for now as a static value
+    // for monitoring purposes. It seemed to reset the data too often instead of allowing slow improvements
+    // it is likely better to calculate based on the percentage of the ellipsoid that has datapoints
+    // so that we know how much is left to "fill".
+    // Calibration trust was meant to track how well fit our ellipsoid was to the sphere, but it seemed to
+    // actually degrade the calibration by removing good datapoints from the array.
+    // In the future we should only change calibration trust when the mag is actually moving instead of
+    // changing trust when the mag is holding still.
+
+    // Maybe instead of just raw checking samples score against the current ellipsoid we should
+    // do a "test" of the new point to see if it improves the fit or if it makes the fit of the 
+    // ellipsoid worse by checking every points score against a "test" ellipsoid.
+    // We could have two ellipsoids that we keep in memory, one as the "active" and the second as the "test"
+    // that we use to update with a test sample, check fit, then if its bad, revert the change.
+    // This would help us validate things a little more maybe?
+
+    // toss out samples that don't fit, and lower trust score.
+
+
+    // Disable now that we have VQF disturbance rejection
+    // // if ((score < 0.9 || score > 1.1) && improvementSamples > 60) {
+    // //   if (calibrationTrust > 0) {
+    // //     calibrationTrust--;
+    // //   }
+    // //   // disable trust based resets
+
+    // //   // if trust drops too much, clear out array and start again from scratch
+    // //   // if (calibrationTrust == 0) {
+    // //   //   resetCalibration();
+    // //   //   calibrationTrust = 500;
+    // //   // }
+
+    // //   return;
+    // // } else if ((score > 0.9 && score < 1.1) && improvementSamples > 60) {
+    // //   if (calibrationTrust < 2500) {
+    // //     calibrationTrust++;
+    // //   }
+    // //   // disable freeze for now...
+
+    // //   // if (calibrationTrust > 2500) {
+    // //   //   freeze = true;
+    // //   // }
+    // // }
+
+    // if there are not any empty slots, check if we are better than the worst sample, if so, replace it.
+    int worstSample = getWorstSample();
+
+    // test how well the new point fits the existing ellipsoid
+    float score;
+    float testSample[3] = {sample[0], sample[1], sample[2]};
+    scaleAndScore(&testSample[0], &score);
+
+
+    float weightedTrustScore = calculateTrust(minDistance, score);
+    logger.trace("Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance, %0.2f Frozen: %d", weightedTrustScore, score, minDistance, freeze);
+
+    // hard ignore points that deviate from the ellipsoid skin
+    if (score < 0.75 || score > 1.25) { return; }
+
+    // See if it is a better point than an existing one
+    if (weightedTrustScore > pointTrustScore[worstSample] && !freeze) {
+        // logger.trace("Replacing current worst sample i:%d (%0.2f) for new sample (%0.2f)!", worstSample, minDist_vec[worstSample], minDistance);
+      // update least square accumulator
+        // leastSquareAccumulate(x_vec[worstSample], y_vec[worstSample], z_vec[worstSample], false); // remove old
+        // leastSquareAccumulate(sample[0], sample[1], sample[2], true); // add new
+      // replace the worst sample
+      x_vec[worstSample] = sample[0];
+      y_vec[worstSample] = sample[1];
+      z_vec[worstSample] = sample[2];
+      if (weightedTrustScore>5) improvementSamples++; // only count improvements that have decent spread
+      // update the min distance for all points now that we have accepted a new point:
+      recalculateTrustScores();
+      // logger.trace("best points:");
+      // for (int i = 0; i < SAMPLES_TOTAL; i++){
+      //   logger.trace("    #%d - minDist: %0.2f, x: %0.1f, y: %0.1f, z: %0.1f", i, minDist_vec[i], x_vec[i], y_vec[i], z_vec[i]);
+      // }
+      // recalculate best sphere to use as hard-iron offset
+        // accumulateAll(); // rerun accumulator...
+        // bestSphereUpdate();
+      
+      // use magneto
+      runMagneto();
+
+      // @TODO: Have some better way to determine when the calibration is ready to provide samples to VQF
+      // we want to provide samples as soon as we have a good enough hard iron calibration, but we don't
+      // want to wait too long, otherwise we can't utilize the mag disturbance rejection
+      // VQF WILL NOT CHANGE IF WE HAVE THIS DUMMY
+      if (!calibrationReady && improvementSamples > 15) {
+        calibrationReady = true;
+      }
+
+      // find the worst fitting sample
+      // consider occasionally tossing out the worst fitting sample so that we can improve fit over time
+      // might backfire if the "bad fitting sample" is actually important to the best sphere fit.
+      float minScore = 1;
+      float runningScoreTotal = 0;
+      for (int i = 0; i < SAMPLES_TOTAL; i++) {
+        float pointScore = 0;
+        float checkSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
+        scaleAndScore(checkSample, &pointScore);
+        runningScoreTotal += pointScore;
+
+        if (pointScore < minScore) {
+          minScore = pointScore;
+        }
+      }
+      runningScoreTotal = runningScoreTotal / SAMPLES_TOTAL;
+      logger.trace("New fit avg score: %0.4f | Min score: %0.4f", runningScoreTotal, minScore);
+    }
+  };
+
+  // scale with score
+  void scaleAndScore(float* sample, float* score) {
+    // logStatus(); // attempt to log whenever we are scaling a sample c:
+    // require minimum calibration before being ready to serve samples to vqf
+    // if (totalSpread < 10000 || improvementSamples < 200 || (radius < 98 || radius > 102)) {
+    
+    float mag_x = sample[0];
+    float mag_y = sample[1];
+    float mag_z = sample[2];
+    // apply hard iron
+    mag_x -= M_Bias[0];
+    mag_y -= M_Bias[1];
+    mag_z -= M_Bias[2];
+
+    // apply soft iron
+    // @TODO: Consider not applying soft-iron until we are within a normal ellipsoid shape (not blown out on any axis)
+    //        or consider having trust for each of the axies seperately? idk.
+    float cx = M_Ainv[0][0] * mag_x + M_Ainv[0][1] * mag_y + M_Ainv[0][2] * mag_z;
+    float cy = M_Ainv[1][0] * mag_x + M_Ainv[1][1] * mag_y + M_Ainv[1][2] * mag_z;
+    float cz = M_Ainv[2][0] * mag_x + M_Ainv[2][1] * mag_y + M_Ainv[2][2] * mag_z;
+
+    float clength = sqrtf(cx * cx + cy * cy + cz * cz);
+    *score = clength / hm;
+
+    // logger.trace("Sample Score: %f", *score);
+
+    sample[0] = cx;
+    sample[1] = cy;
+    sample[2] = cz;
+  }
+
+  // Takes the raw distance from other points as well as the deviation from the ellipsoid skin
+  // then creates a weighted penalty score and applys that to the spread.
+  // Returns an overall calculated trust score. 
+  const float PENALTY_SCALE = 1.0f / 0.1f; // a deviation of 0.1 will halve the spread score as a penalty
+  float calculateTrust(float spreadScore, float deviationScore) {
+    float deviationNorm = PENALTY_SCALE * (deviationScore-1.0f);
+    return spreadScore / (1.0f+(deviationNorm*deviationNorm));
+  }
 
   /**
    * Code to calculate the least squares sphere to use as the hard iron bias for the mag calibration.

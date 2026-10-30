@@ -59,7 +59,9 @@ public:
 		Logging::Logger& logger,
 		SensorToggleState& toggles
 	)
-		: Base{fusion, imu, sensorId, logger, toggles} {
+		: Base{fusion, imu, sensorId, logger, toggles},
+		magCalibrator{fusion.getVQF()} 
+	{
 		calibration.T_Ts = Consts::getDefaultTempTs();
 		activeCalibration.T_Ts = Consts::getDefaultTempTs();
 	}
@@ -179,6 +181,9 @@ public:
 	}
 
 	float getGyroTimestep() final { return activeCalibration.G_Ts; }
+
+	void scaleMagSample(float* magSample){ magCalibrator.scaleMagSample(magSample); }
+
 	float getMagTimestep() final { return activeCalibration.M_Ts; }
 
 	float getTempTimestep() final { return activeCalibration.T_Ts; }
@@ -416,6 +421,8 @@ private:
 	NullCalibrationStep<RawSensorT> nullCalibrationStep{calibration};
 
 	CalibrationStep<RawSensorT>* currentStep = &nullCalibrationStep;
+
+	MagCalibrator magCalibrator;
 
 	bool isCalibrating = false;
 	bool skippedAStep = false;

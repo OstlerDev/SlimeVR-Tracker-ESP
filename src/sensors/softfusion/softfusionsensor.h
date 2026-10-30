@@ -153,7 +153,9 @@ class SoftFusionSensor : public Sensor {
 	void processMagSample(const uint8_t* sample, const sensor_real_t timeDelta) {
 		float scaledSample[3];
 		magDriver.scaleMagSample(sample, scaledSample);
-		m_fusion.updateMag(scaledSample);
+		calibrator.scaleMagSample(scaledSample);
+
+		m_fusion.updateMag(scaledSample, timeDelta);
 	}
 
 public:
