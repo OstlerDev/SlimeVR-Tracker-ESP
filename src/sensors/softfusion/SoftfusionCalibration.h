@@ -245,6 +245,10 @@ public:
 	
 	float getMagTimestep() final { return calibration.M_Ts; }
 
+	bool magReady() {
+		return false; // mag only implemented in Runtime Calibration
+	}
+
 	float getTempTimestep() final { return calibration.T_Ts; }
 
 	const uint8_t* getMotionlessCalibrationData() final {

@@ -186,6 +186,8 @@ public:
 
 	float getMagTimestep() final { return activeCalibration.M_Ts; }
 
+	bool magReady() { return magCalibrator.magReady(); }
+
 	float getTempTimestep() final { return activeCalibration.T_Ts; }
 
 	const uint8_t* getMotionlessCalibrationData() final {

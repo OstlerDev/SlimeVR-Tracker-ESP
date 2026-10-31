@@ -60,6 +60,12 @@ public:
     // }
   }
 
+  // Should we start using 9D fusion outputs or keep using 6D fusion.
+  // We still pass mag data to VQF, this is just if we utilize it or not.
+  bool magReady() {
+    return vqfHasBeenHealthy;
+  }
+
 private:
   Logging::Logger logger{"MagCalibrator"};
   VQF* fusion; // reference to vqf for direct access
@@ -75,13 +81,13 @@ private:
       startTime = now;
     }
     // wait 2 minutes to collect datapoints
-    if (now - startTime > 60*0.2*1000) {
+    if (now - startTime > 120*1000) {
       startCalibration = true;
     }
     // full log every 30 seconds
-    if (now - lastLogTime > 60*0.5*1000) {
+    if (now - lastLogTime > 30*1000) {
       lastLogTime = now;
-      logger.debug("Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.1f, improvement samples: %d)", M_Bias[0], M_Bias[1], M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", M_Bias[0], M_Bias[1], M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
       logger.debug("Magneto1.4 calibration matrix:");
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
@@ -140,16 +146,52 @@ private:
     }
     return -1;
   }
-  // find the sample that is closest to another sample so that we can replace it.
+  // find the worst sample that we should replace within the point cloud.
+  // Either find the sample with the lowest spread for replacement,
+  // or find the sample that severely deviates from 
   int getWorstSample(){
+    float currentBestDist = minDist_vec[0];
+    int bestDistIndex = 0;
     float currentWorst = pointTrustScore[0];
     int worstSample = 0;
+    float worstErrorScore = pointDeviation[0];
+    int worstErrorSample = 0;
+
+    // used to calculate the average distance to find outliers
+    float distanceAccumulator = minDist_vec[0];
+
     for (int i = 1; i < SAMPLES_TOTAL; i++) {
+      distanceAccumulator += minDist_vec[i];
+      if (minDist_vec[i] > currentBestDist) {
+        currentBestDist = minDist_vec[i];
+        bestDistIndex = i;
+      }
       if (pointTrustScore[i] < currentWorst) {
         currentWorst = pointTrustScore[i];
         worstSample = i;
       }
+      if (pointDeviation[i] > worstErrorScore) {
+        worstErrorScore = pointDeviation[i];
+        worstErrorSample = i;
+      }
     }
+    // Replace highly deviated samples first to clear out samples with errors 
+    // that might have been accumulated when the mag was being disturbed
+    // first, sanity check using extreme spread distances, since those are likely to be errors
+    // verify using the most deviated samples by using a basic average
+    if (currentBestDist > 100 && currentBestDist > (distanceAccumulator/SAMPLES_TOTAL)*5) {
+      logger.trace("Force replacing deviated distance: %0.2f (avg: %0.2f), index: %d", currentBestDist, (distanceAccumulator/SAMPLES_TOTAL), bestDistIndex);
+      pointTrustScore[bestDistIndex] = 0;
+      return bestDistIndex;
+    }
+    // if there are no isolated samples, next reject samples that deviate from ellipsoid skin.
+    if (getErrorAmt(worstErrorScore) > 0.15) {
+      logger.trace("Force replacing deviated score: %0.4f, index: %d", worstErrorScore, worstErrorSample);
+      // Set the weighted trust score to zero to force replacement of this sample.
+      pointTrustScore[worstErrorSample] = 0;
+      return worstErrorSample;
+    }
+    // If all samples are within threshold, then just replace the least spread point.
     return worstSample;
   }
   // get the minimum distance to any other point
@@ -187,14 +229,17 @@ private:
   float getErrorTotal(){
     float totalError = 0;
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
-      float devScore = pointDeviation[i];
-      if (devScore < 1) {
-        totalError += (1-devScore);
-      } else {
-        totalError += (devScore-1);
-      }
+      totalError += getErrorAmt(pointDeviation[i]);
     }
     return totalError;
+  }
+  // get a scale for the deviation from a point
+  float getErrorAmt(float deviation) {
+    if (deviation < 1) {
+      return 1.0f-deviation;
+    } else {
+      return deviation-1.0f;
+    }
   }
   // calculates raw distance between 2 3d points
   float calculateDistance(float x1, float x2, float y1, float y2, float z1, float z2){
@@ -213,7 +258,7 @@ private:
     if (!startCalibration) {
       return;
     }
-    // only collect a datapoint every X samples provided
+    // only collect a datapoint every X samples provided (unless we are filling initial array)
     samplerDelay++;
     if (samplerDelay % sampleRate != 0) { return; }
     samplerDelay = 0;
@@ -250,7 +295,7 @@ private:
     int emptyIndex = getFirstEmpty();
     float minDistance = getMinDistance(sample);
     // when building the array require a spread sample.
-    if (minDistance < 3 && emptyIndex != -1) return;
+    if (minDistance < 5 && emptyIndex != -1) return;
     if (emptyIndex != -1) {
       x_vec[emptyIndex] = sample[0];
       y_vec[emptyIndex] = sample[1];
@@ -319,13 +364,13 @@ private:
 
 
     float weightedTrustScore = calculateTrust(minDistance, score);
-    logger.trace("Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance, %0.2f Frozen: %d", weightedTrustScore, score, minDistance, freeze);
+    logger.trace("Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f", weightedTrustScore, score, minDistance, worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample]);
 
-    // hard ignore points that deviate from the ellipsoid skin
-    if (score < 0.75 || score > 1.25) { return; }
+    // hard ignore points that deviate from the ellipsoid skin **UNLESS** we are force replacing a bad point
+    if ((score < 0.7 || score > 1.3) && pointTrustScore[worstSample] > 0.0f) { return; }
 
     // See if it is a better point than an existing one
-    if (weightedTrustScore > pointTrustScore[worstSample] && !freeze) {
+    if ((weightedTrustScore > pointTrustScore[worstSample] || pointTrustScore[worstSample] <= 0.0f) && !freeze) {
         // logger.trace("Replacing current worst sample i:%d (%0.2f) for new sample (%0.2f)!", worstSample, minDist_vec[worstSample], minDistance);
       // update least square accumulator
         // leastSquareAccumulate(x_vec[worstSample], y_vec[worstSample], z_vec[worstSample], false); // remove old

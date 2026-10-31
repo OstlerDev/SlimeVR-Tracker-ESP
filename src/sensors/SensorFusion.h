@@ -61,6 +61,8 @@ public:
 
 	bool isUpdated();
 	void clearUpdated();
+	void getQuat9D(sensor_real_t* quat6d);
+	void getQuat6D(sensor_real_t* quat9d);
 	sensor_real_t const* getQuaternion();
 	Quat getQuaternionQuat();
 	sensor_real_t const* getGravityVec();

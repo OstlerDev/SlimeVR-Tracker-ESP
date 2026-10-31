@@ -63,6 +63,13 @@ bool SensorFusion::isUpdated() { return updated; }
 
 void SensorFusion::clearUpdated() { updated = false; }
 
+void SensorFusion::getQuat6D(sensor_real_t* quat6d) { 
+	vqf.getQuat6D(quat6d);
+}
+void SensorFusion::getQuat9D(sensor_real_t* quat9d) { 
+	vqf.getQuat9D(quat9d);
+}
+
 sensor_real_t const* SensorFusion::getQuaternion() {
 	if (magExist) {
 		vqf.getQuat9D(qwxyz);

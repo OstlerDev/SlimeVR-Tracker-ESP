@@ -85,6 +85,7 @@ public:
 	
 	virtual void scaleMagSample(float* magSample) = 0;
 	virtual float getMagTimestep() = 0;
+	virtual bool magReady() = 0;
 
 	virtual float getTempTimestep() = 0;
 

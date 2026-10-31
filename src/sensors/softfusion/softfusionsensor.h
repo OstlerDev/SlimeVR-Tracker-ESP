@@ -274,7 +274,7 @@ public:
 
 			m_lastRotationPacketSent = now - (elapsed - sendInterval);
 
-			setFusedRotation(m_fusion.getQuaternionQuat());
+			setFusedRotation(getQuaternionQuat()); // use internal method that depends on mag ready vs not ready
 			setAcceleration(m_fusion.getLinearAccVec());
 			optimistic_yield(100);
 		}
@@ -282,6 +282,17 @@ public:
 		if (calibrationDetector.update(m_fusion)) {
 			markRestCalibrationComplete();
 		}
+	}
+
+	sensor_real_t qwxyz[4]{1.0f, 0.0f, 0.0f, 0.0f};
+	Quat getQuaternionQuat() {
+		if (calibrator.magReady()) {
+			m_fusion.getQuat9D(qwxyz);
+		} else {
+			m_fusion.getQuat6D(qwxyz);
+		}
+
+		return Quat(qwxyz[1], qwxyz[2], qwxyz[3], qwxyz[0]);
 	}
 
 	void motionSetup() final {
