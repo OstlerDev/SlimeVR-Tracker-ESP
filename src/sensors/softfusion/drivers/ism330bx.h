@@ -62,7 +62,9 @@ struct ISM330BX : LSM6DSV {
     lastMagPollMillis = millis();
     magPollingEnabled = true;
   }
-  void stopAuxPolling() {}
+  void stopAuxPolling() {
+    magPollingEnabled = false;
+  }
 
   bool bulkRead(DriverCallbacks<int16_t>&& cb) {
     DriverCallbacks<int16_t> callbacks = {

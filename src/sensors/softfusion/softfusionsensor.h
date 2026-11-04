@@ -351,9 +351,6 @@ public:
 
 		calibrator.checkStartupCalibration();
 
-		m_Logger.debug("Consts::SupportsMags: %d", Consts::SupportsMags);
-		m_Logger.debug("toggles.getToggle(SensorToggles::MagEnabled): %d", toggles.getToggle(SensorToggles::MagEnabled));
-
 		if constexpr (Consts::SupportsMags) {
 			magDriver.init(
 				SoftFusion::MagInterface{
@@ -393,6 +390,11 @@ public:
 	}
 
 	[[nodiscard]] bool isFlagSupported(SensorToggles toggle) const final {
+		if constexpr (Consts::SupportsMags) {
+			if (toggle == SensorToggles::MagEnabled && magDriver.isMagAttached()) {
+				return true;
+			}
+		}
 		return toggle == SensorToggles::CalibrationEnabled
 			|| toggle == SensorToggles::TempGradientCalibrationEnabled;
 	}

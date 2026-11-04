@@ -164,6 +164,7 @@ void MagDriver::startPolling() const {
 	}
 
 	interface.startPolling(detectedMag->dataReg, detectedMag->dataWidth);
+	logger.info("Started Mag Polling!");
 }
 
 void MagDriver::stopPolling() const {
@@ -172,6 +173,7 @@ void MagDriver::stopPolling() const {
 	}
 
 	interface.stopPolling();
+	logger.info("Stopped Mag Polling!");
 }
 
 int log = 0;
