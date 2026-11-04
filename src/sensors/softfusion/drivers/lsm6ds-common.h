@@ -204,36 +204,38 @@ struct LSM6DSOutputHandler {
 		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Config::reg, BaseRegs::SHUBSlv0Config::value);
 		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Datawrite::reg, value); // set data to write
 		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::masterOn | BaseRegs::SHUBMasterConfig::writeOnce);
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
 		delay(50);
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub
 		uint8_t shub_status = m_RegisterInterface.readReg(BaseRegs::SHUBStatus::reg);
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
 		bool err = false;
 		if (shub_status & 0b00001000) { // verify SLAVE0_NACK
-			m_Logger.debug("Sensor Hub SLV0 NACK!");
+			m_Logger.trace("Sensor Hub SLV0 NACK!");
 			err = true;
 		}
 		if (!(shub_status & 0b10000000)) { // verify WR_ONCE_DONE
-			m_Logger.debug("Sensor Hub SLV0 did not set WR_ONCE_DONE");
+			m_Logger.trace("Sensor Hub SLV0 did not set WR_ONCE_DONE");
 			err = true;
 		}
 		if (!(shub_status & 0b00000001)) { // verify SENS_HUB_ENDOP
-			m_Logger.debug("Sensor Hub SLV0 did not set SENS_HUB_ENDOP");
+			m_Logger.trace("Sensor Hub SLV0 did not set SENS_HUB_ENDOP");
 			err = true;
 		}
 		if (err){
-			m_Logger.debug("Error during writeAux (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
+			m_Logger.trace("Error during writeAux (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
 		}
 		if (!err) {
-			m_Logger.debug("Sensor Hub SLV0 successfully wrote to aux device (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
+			m_Logger.trace("Sensor Hub SLV0 successfully wrote to aux device (auxDevice: 0x%x) (addr: 0x%x), (value: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, value, shub_status);
 			// readAux(address); // check value after set
 		}
-		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
 		return;
 	}
 
 	uint8_t readAux(uint8_t address) {
 		uint8_t buffer = 0;
 		readAux(address, 1, &buffer);
-		m_Logger.debug("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x)", auxDeviceId, address, buffer);
+		m_Logger.trace("readAux response (auxDevice: 0x%x) (addr: 0x%x), (res: 0x%x)", auxDeviceId, address, buffer);
 		return buffer;
 	}
 
@@ -242,13 +244,15 @@ struct LSM6DSOutputHandler {
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub
 		m_RegisterInterface.writeReg(BaseRegs::SHUBSlv0Config::reg, BaseRegs::SHUBSlv0Config::value | (0x01 + auxDeviceDummyBytes)); // read 1 byte + dummy bytes.
 		m_RegisterInterface.writeReg(BaseRegs::SHUBMasterConfig::reg, BaseRegs::SHUBMasterConfig::masterOn); // turn on sensor hub i2c master
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
 		delay(50);
+		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::shub); // enable reading from sensor hub
 		uint8_t shub_status = m_RegisterInterface.readReg(BaseRegs::SHUBStatus::reg);
 		if (shub_status & 0b00001000) { // verify SLAVE0_NACK
-			m_Logger.debug("Sensor Hub SLV0 NACK! (auxDevice: 0x%x) (addr: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, shub_status);
+			m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
+			m_Logger.trace("Sensor Hub SLV0 NACK! (auxDevice: 0x%x) (addr: 0x%x), (shub_status: 0x%x)", auxDeviceId, address, shub_status);
 			return;
 		}
-		m_Logger.debug("SensorHub Status: 0x%x", shub_status);
 		// read into buffer
 		m_RegisterInterface.readBytes(BaseRegs::SHUBOut1::reg + auxDeviceDummyBytes, size, buffer); // offset read by dummy bytes
 		m_RegisterInterface.writeReg(BaseRegs::CFGAccess::reg, BaseRegs::CFGAccess::main); // return to main register bank
