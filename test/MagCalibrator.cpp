@@ -23,13 +23,14 @@ void tearDown(void){}
 void createCalibration(void) {
   std::printf("Starting running calibration test! :D\n");
 
-  std::ifstream file("test/2026-11-01_22-16-58_LEFT_UPPER_ARM_F024F9CC2DF90.log");
+  // std::ifstream file("test/2026-11-01_22-16-58_LEFT_UPPER_ARM_F024F9CC2DF90.log");
   // std::ifstream file("test/2026-11-01_22-16-58_LEFT_UPPER_LEG_F024F9CC5D570.log");
   // std::ifstream file("test/2026-11-01_22-16-58_LEFT_FOOT_F024F9CC31CF0.log");
   // std::ifstream file("test/2026-11-04_01-05-31_LEFT_FOOT_F024F9CC31CF0.log");
   // std::ifstream file("test/2026-11-01_22-16-58_RIGHT_UPPER_LEG_F024F9CC3EB10.log");
   // std::ifstream file("test/2026-11-01_22-16-58_HIP_F024F9CC2ECB0.log");
-  // std::ifstream file("test/2026-11-05_15-09-04_LEFT_LOWER_LEG_F024F9CCC0620_taekwondo.log");
+  // std::ifstream file("test/2026-11-05_15-09-04_LEFT_FOOT_F024F9CC31CF0_taekwondo.log");
+  std::ifstream file("test/2026-11-05_15-09-04_LEFT_LOWER_LEG_F024F9CCC0620_taekwondo.log");
   std::FILE* outfile = std::fopen("test/visualization-output.json", "w");
   if (!file.is_open() /*|| outfile == nullptr*/) {
     std::printf("Error: Could not open file\n");
@@ -63,6 +64,7 @@ void createCalibration(void) {
   int linesProcessed = 0;
   int ignoreLines = 0;
   int magHealthyAt = 0;
+  int vqfHealthyAt = 0;
   // simulate time at 100hz
   while (linesProcessed < ignoreLines) { linesProcessed++; millisTimeSimulate+=10; std::getline(file,line); } // ignore first 2 minutes
   while (/*linesProcessed < (180000 + ignoreLines) &&*/ std::getline(file,line)) {
@@ -82,13 +84,16 @@ void createCalibration(void) {
     vqf.updateMag(mag);
 
     // process quat to force vqf forward
-    if (magCalibrator.magReady()) {
+    if (magCalibrator.magHealthy()) {
       vqf.getQuat9D(qwxyz);
     } else {
       vqf.getQuat6D(qwxyz);
     }
-    if (magHealthyAt == 0 && magCalibrator.magReady()) {
+    if (magHealthyAt == 0 && magCalibrator.magHealthy()) {
       magHealthyAt = linesProcessed;
+    }
+    if (vqfHealthyAt == 0 && magCalibrator.vqfReady()) {
+      vqfHealthyAt = linesProcessed;
     }
 
     if (linesProcessed % 100000 == 0) { magCalibrator.logCalibration(); } 
@@ -98,10 +103,12 @@ void createCalibration(void) {
   }
   float timePassed = linesProcessed/(60.0f*60.0f*100.0f);
   float timeMagHealthyAt = magHealthyAt/(60.0f*60.0f*100.0f);
+  float timeVQFHealthyAt = vqfHealthyAt/(60.0f*60.0f*100.0f);
   float totalTimeHealthy = magCalibrator.getTotalHealthDuration()/(60.0f*60.0f);
   float totalTimeDisturbed = magCalibrator.getTotalDisturbedDuration()/(60.0f*60.0f);
   magCalibrator.logCalibration();
-  std::printf("Processed %d samples (~%0.2fhrs) (mag healthy at: ~%0.2fhrs, ~%0.2fhrs left) (total time healthy: ~%0.2fhrs) (total time disturbed: ~%0.2fhrs)\n", linesProcessed, timePassed, timeMagHealthyAt, timePassed-timeMagHealthyAt, totalTimeHealthy, totalTimeDisturbed);
+  std::printf("Processed %d samples (~%0.2fhrs) (vqf healthy at: ~%0.2fhrs) (total time vqf healthy: ~%0.2fhrs) (total time vqf disturbed: ~%0.2fhrs)\n", linesProcessed, timePassed, timeVQFHealthyAt, timePassed-timeVQFHealthyAt, totalTimeHealthy, totalTimeDisturbed);
+  std::printf("Processed %d samples (~%0.2fhrs) (mag healthy at: ~%0.2fhrs, ~%0.2fhrs left)\n", linesProcessed, timePassed, timeMagHealthyAt, timePassed-timeMagHealthyAt);
 }
 
 int main() {

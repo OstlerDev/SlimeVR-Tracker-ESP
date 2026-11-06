@@ -98,6 +98,10 @@ struct RuntimeCalibrationSensorConfig {
 
 	bool accelCalibrated[3];
 	float A_off[3];
+
+	float M_Bias[3];
+	float M_Ainv[3][3];
+	float M_hm;
 };
 
 struct MPU6050SensorConfig {

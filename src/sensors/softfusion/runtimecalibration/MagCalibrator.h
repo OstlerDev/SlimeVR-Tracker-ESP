@@ -30,7 +30,7 @@
 #include <functional>
 #include <optional>
 
-#define BENCHMARK_MAG_CALIBRATOR false
+#define BENCHMARK_MAG_CALIBRATOR true
 #if BENCHMARK_MAG_CALIBRATOR
 #include "debugging/Benchmark.h"
 #endif
@@ -41,6 +41,7 @@ namespace SlimeVR::Sensors::RuntimeCalibration {
 
 class HealthSampler {
 public:
+  void setHealth(float newHealth) { health = newHealth; }
   float getHealth() { return health; }
   void addSample(float score) {
     float sampleHealth = scoreToHealth(score);
@@ -49,7 +50,7 @@ public:
     health += healthDelta;
   }
 private:
-  const int HEALTH_WINDOW = 1000;
+  const int HEALTH_WINDOW = 2000;
   const float SMOOTHING_FACTOR = 2.0f/(HEALTH_WINDOW+1);
   const int ERROR_SCALER = 5;
   float health = 0.0f;
@@ -71,7 +72,16 @@ class MagCalibrator {
 public:
   MagCalibrator(VQF* vqf) : fusion(vqf) {
     resetCalibration(); // init
+    activeHealth.setHealth(0.6);
   }
+
+  // public because returning them is annoying...
+  float Best_M_Bias[3] = {0.0f, 0.0f, 0.0f};
+  float Best_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
+  double Best_hm = 100;
+  float Candidate_M_Bias[3] = {0.0f, 0.0f, 0.0f};
+  float Candidate_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
+  double Candidate_hm = 100;
 
   bool freeze = false;
   void scaleMagSample(float* sample) {
@@ -86,37 +96,48 @@ public:
     magCalibrateBM.after();
 #endif
 
-    if (!startCalibration || !calibrationReady) {
-      sample[0] = 0;
-      sample[1] = 0;
-      sample[2] = 0;
-      return;
-    }
-
     float movementFromLast = calculateDistance(sample[0], lastSample[0], sample[1], lastSample[1], sample[2], lastSample[2]);
     lastSample[0] = sample[0];
     lastSample[1] = sample[1];
     lastSample[2] = sample[2];
 
-    float score = 0;
-    scaleAndScore(sample, &score);
+    float score = 0.0f;
+    scaleAndScore(sample, &score, Best_M_Bias, Best_M_Ainv, Best_hm);
 
     // only adjust health when movement is detected (don't improve health for sitting still)
-    if (movementFromLast > 3) activeHealth.addSample(score);
-    // logger.trace("Sample Score: %f, Trust: %d, Frozen: %d", score, calibrationTrust, freeze);
-    // logger.trace("Sample Score: %f", score);
+    if (movementFromLast > 3){
+      activeHealth.addSample(score);
 
-    // if (improvementSamples < 50) {
-    //   sample[0] = 0;
-    //   sample[1] = 0;
-    //   sample[2] = 0;
-    //   return;
-    // }
+      float candidateScore = 0.0f;
+      float candidateSample[3] = {lastSample[0], lastSample[1], lastSample[2]};
+      scaleAndScore(candidateSample, &candidateScore, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
+      candidateHealth.addSample(candidateScore);
+    }
   }
 
   // Should we start using 9D fusion outputs or keep using 6D fusion.
   // We still pass mag data to VQF, this is just if we utilize it or not.
-  bool magReady() { return vqfHasBeenHealthy; }
+  bool magHealthy() { 
+    return activeHealth.getHealth() > 0.9;
+    // return vqfHasBeenHealthy; // check if vqf has found a mag heading or not
+  }
+  bool vqfReady() { return vqfHasBeenHealthy; }
+
+  void setMBias(float M_Bias[3]) {
+    Best_M_Bias[0] = M_Bias[0];
+    Best_M_Bias[1] = M_Bias[1];
+    Best_M_Bias[2] = M_Bias[2];
+  }
+  void setMAinv(float M_A_inv[3][3]) {
+    for (int i = 0; i < 3; i++) {
+      Best_M_Ainv[0][i] = M_A_inv[0][i];
+      Best_M_Ainv[1][i] = M_A_inv[1][i];
+      Best_M_Ainv[2][i] = M_A_inv[2][i];
+    }
+  }
+  void setHM(float M_hm) {
+    Best_hm = M_hm;
+  }
 
   // debug helpers
   void logCalibration() { logStatus(true); }
@@ -148,7 +169,8 @@ private:
   }
 
   HealthSampler activeHealth;
-  // HealthSampler candidateHealth; // soon(tm)
+  HealthSampler candidateHealth;
+
   const int THROTTLE_ELLIPSOID_DURATION = 2 * 1000; // Throttle the frequency of calculating the ellipsoid to prevent lag.
   uint64_t lastEllipsoidCreate = 0;
 
@@ -170,24 +192,42 @@ private:
       startCalibration = true;
     }
     // full log every 30 seconds
-    if (now - lastLogTime > 120*1000 || forcePrint) {
+    if (now - lastLogTime > 15*1000 || forcePrint) {
       lastLogTime = now;
       const VQFState& vqfState = fusion->getState();
       float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
       logger.debug("[%d] VQF: Healthy Duration: %0.2f (current accepted mag field: norm %0.4f, dip %0.4f) Disturbed duration: %0.1f (candidate mag field: time %0.2f, norm %0.4f, dip %0.4f)", sampleNumber, vqfState.magUndisturbedT, vqfState.magRefNorm, vqfState.magRefDip, disturbedFor, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
-      logger.debug("Active calibration health: %0.3f", activeHealth.getHealth());
-      logger.debug("Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", M_Bias[0], M_Bias[1], M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
-      logger.debug("Magneto1.4 calibration matrix:");
+      logger.debug("Active calibration health: %0.3f, Candidate calibration health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
+      
+      // log current best
+      logger.debug("Best Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Best_M_Bias[0], Best_M_Bias[1], Best_M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Best Magneto1.4 calibration matrix:");
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
           "  [%f, %f, %f],",
-          M_Ainv[0][i],
-          M_Ainv[1][i],
-          M_Ainv[2][i]
+          Best_M_Ainv[0][i],
+          Best_M_Ainv[1][i],
+          Best_M_Ainv[2][i]
         );
       }
       logger.debug("}");
+
+      // log current candidate
+      logger.debug("Candidate Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Candidate_M_Bias[0], Candidate_M_Bias[1], Candidate_M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Candidate Magneto1.4 calibration matrix:");
+      logger.debug("{");
+      for (int i = 0; i < 3; i++) {
+        logger.debug(
+          "  [%f, %f, %f],",
+          Candidate_M_Ainv[0][i],
+          Candidate_M_Ainv[1][i],
+          Candidate_M_Ainv[2][i]
+        );
+      }
+      logger.debug("}");
+
+      // log point cloud
       logger.debug("Point Cloud: {");
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
         logger.debug("  [%0.4f, %0.4f, %0.4f],", x_vec[i], y_vec[i], z_vec[i]);
@@ -218,15 +258,32 @@ private:
       z_vec[i] = 0;
       pointTrustScore[i] = 0;
     }
-    hm = 0;
-    M_Bias[0] = 0;
-    M_Bias[1] = 0;
-    M_Bias[2] = 0;
+
+    Best_hm = 100;
+    Best_M_Bias[0] = 0.0f;
+    Best_M_Bias[1] = 0.0f;
+    Best_M_Bias[2] = 0.0f;
     for (int i = 0; i < 3; i++) {
-      M_Ainv[0][i] = 0;
-      M_Ainv[1][i] = 0;
-      M_Ainv[2][i] = 0;
+      Best_M_Ainv[0][i] = 0.0f;
+      Best_M_Ainv[1][i] = 0.0f;
+      Best_M_Ainv[2][i] = 0.0f;
     }
+    Best_M_Ainv[0][0] = 1.0f;
+    Best_M_Ainv[1][1] = 1.0f;
+    Best_M_Ainv[2][2] = 1.0f;
+
+    Candidate_hm = 100;
+    Candidate_M_Bias[0] = 0.0f;
+    Candidate_M_Bias[1] = 0.0f;
+    Candidate_M_Bias[2] = 0.0f;
+    for (int i = 0; i < 3; i++) {
+      Candidate_M_Ainv[0][i] = 0.0f;
+      Candidate_M_Ainv[1][i] = 0.0f;
+      Candidate_M_Ainv[2][i] = 0.0f;
+    }
+    Candidate_M_Ainv[0][0] = 1.0f;
+    Candidate_M_Ainv[1][1] = 1.0f;
+    Candidate_M_Ainv[2][2] = 1.0f;
   }
   int getFirstEmpty(){
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
@@ -272,6 +329,7 @@ private:
   // find the worst sample that we should replace within the point cloud.
   // Either find the sample with the lowest spread for replacement,
   // or find the sample that severely deviates from 
+  int forceReplaceCount = 0;
   int getWorstSample(){
     float currentBestDist = minDist_vec[0];
     int bestDistIndex = 0;
@@ -301,13 +359,15 @@ private:
     if (currentBestDist > 100 && currentBestDist > averageDistance*5) {
       logger.debug("Force replacing deviated distance: %0.2f (avg: %0.2f), index: %d", currentBestDist, averageDistance, bestDistIndex);
       pointTrustScore[bestDistIndex] = 0;
+      forceReplaceCount++;
       return bestDistIndex;
     }
     // if there are no isolated samples, next reject samples that deviate from ellipsoid skin.
-    if (getErrorAmt(worstErrorScore) > 0.15 && isGoodSoftCal()) {
+    if (getErrorAmt(worstErrorScore) > 0.15 && isGoodSoftCal(Candidate_M_Ainv)) {
       logger.debug("Force replacing deviated score: %0.4f, index: %d", worstErrorScore, worstErrorSample);
       // Set the weighted trust score to zero to force replacement of this sample.
       pointTrustScore[worstErrorSample] = 0;
+      forceReplaceCount++;
       return worstErrorSample;
     }
     // If all samples are within threshold, then just replace the least spread point.
@@ -343,8 +403,8 @@ private:
     recalculateMinDistance();
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
       float sample[3] = {x_vec[i], y_vec[i], z_vec[i]};
-      float score;
-      scaleAndScore(sample, &score);
+      float score = 0.0f;
+      scaleAndScore(sample, &score, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
       pointDeviation[i] = score;
       pointTrustScore[i] = calculateTrust(minDist_vec[i], score);
     }
@@ -379,7 +439,7 @@ private:
   };
 
   // experimental sanity check on soft-iron ellipsoid values (https://github.com/ysoldak/magcal/blob/master/magcal.go#L197)
-  bool isGoodSoftCal() {
+  bool isGoodSoftCal(float M_Ainv[3][3]) {
     // soft iron sanity checks
     float x = M_Ainv[0][0];
     float y = M_Ainv[1][1];
@@ -399,6 +459,22 @@ private:
       return false; 
     }
 
+    return true;
+  }
+
+  bool doCalibrationsMatch() {
+    // If we have not initialized the best calibration then return false
+    if (Best_M_Bias[0] == 0 && Best_M_Bias[1] == 0 && Best_M_Bias[2] == 0) return false;
+    // check if they are an exact match or not
+    if (Candidate_M_Bias[0] != Best_M_Bias[0]) return false;
+    if (Candidate_M_Bias[1] != Best_M_Bias[1]) return false;
+    if (Candidate_M_Bias[2] != Best_M_Bias[2]) return false;
+    for (int i = 0; i < 3; i++) {
+      if (Candidate_M_Ainv[i][0] != Best_M_Ainv[i][0]) return false;
+      if (Candidate_M_Ainv[i][1] != Best_M_Ainv[i][1]) return false;
+      if (Candidate_M_Ainv[i][2] != Best_M_Ainv[i][2]) return false;
+    }
+    if (Candidate_hm != Best_hm) return false;
     return true;
   }
 
@@ -426,6 +502,44 @@ private:
       return;
     }
 
+    // Check if the current candidate ellipsoid is the best one we have right now
+    // We do this before accepting a new point and calculating a new ellipsoid
+    // This means early on we will get lots of calibrations accepted then it becomes harder
+    if (!doCalibrationsMatch() && activeHealth.getHealth() < candidateHealth.getHealth() && candidateHealth.getHealth() > 0.75) {
+      logger.debug("Promoting Candidate Ellipsoid to Best Ellipsoid! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
+      Best_M_Bias[0] = Candidate_M_Bias[0];
+      Best_M_Bias[1] = Candidate_M_Bias[1];
+      Best_M_Bias[2] = Candidate_M_Bias[2];
+      Candidate_M_Bias[0] = 0.0f;
+      Candidate_M_Bias[1] = 0.0f;
+      Candidate_M_Bias[2] = 0.0f;
+      for (int i = 0; i < 3; i++) {
+        Best_M_Ainv[0][i] = Candidate_M_Ainv[0][i];
+        Best_M_Ainv[1][i] = Candidate_M_Ainv[1][i];
+        Best_M_Ainv[2][i] = Candidate_M_Ainv[2][i];
+        Candidate_M_Ainv[0][i] = 0.0f;
+        Candidate_M_Ainv[1][i] = 0.0f;
+        Candidate_M_Ainv[2][i] = 0.0f;
+      }
+      Candidate_M_Ainv[0][0] = 1.0f;
+      Candidate_M_Ainv[1][1] = 1.0f;
+      Candidate_M_Ainv[2][2] = 1.0f;
+      Best_hm = Candidate_hm;
+      Candidate_hm = 100;
+
+      // Wipe out 1/2rd of the point cloud to force reconvergence
+      for (int i = 0; i < SAMPLES_TOTAL; i++) {
+        if (i % 2 == 0) continue; // skip every other
+        x_vec[i] = 0;
+        y_vec[i] = 0;
+        z_vec[i] = 0;
+        pointTrustScore[i] = 0;
+      }
+
+      // ToDo: Decide if we should be doing this and setting it all the way to zero, or if it would be better to set to something like 0.5
+      // Reset candidate health to make the new candidate prove it's healthy over a new time period.
+      candidateHealth.setHealth(0.0f);
+    }
 
     // Ignore new samples if mag is disturbed
     if (calibrationReady) {
@@ -464,7 +578,7 @@ private:
         }
       } else {
         long timeNow = millis();
-        if (!vqfHasBeenHealthy) logger.info("[%d] VQF: Accepted mag heading for first time! Calibration health: %0.3f, Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, activeHealth.getHealth(), vqfState.magRefNorm, vqfState.magRefDip);
+        if (!vqfHasBeenHealthy) logger.info("[%d] VQF: Accepted mag heading for first time! Active calibration health: %0.3f, Candidate calibration health: %0.3f, Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, activeHealth.getHealth(), candidateHealth.getHealth(), vqfState.magRefNorm, vqfState.magRefDip);
         if (disturbedDuration > 0) {
           float disturbedFor = (timeNow - lastHealthyTime) / 1000.0f;
           logger.debug("[%d] VQF: Mag is now healthy again! Was disturbed for: %0.2f (current accepted mag field: norm %0.4f, dip: %0.4f)", sampleNumber, disturbedFor, vqfState.magRefNorm, vqfState.magRefDip);
@@ -547,27 +661,47 @@ private:
     // //   // }
     // // }
 
+
     // if there are not any empty slots, check if we are better than the worst sample, if so, replace it.
     int worstSample = getWorstSample();
 
+    // if we are stuck in a bad state, go ahead and wipe out half of the points and specifically the point that is bad.
+    if (forceReplaceCount > 100) {
+      logger.debug("Force replacing stuck in bad state, wiping half of the point cloud to clear bad state...");
+      forceReplaceCount = 0;
+      // Wipe out 1/2rd of the point cloud to force reconvergence
+      for (int i = 0; i < SAMPLES_TOTAL; i++) {
+        if (i % 2 == 0) continue; // skip every other
+        x_vec[i] = 0;
+        y_vec[i] = 0;
+        z_vec[i] = 0;
+        pointTrustScore[i] = 0;
+      }
+      x_vec[worstSample] = 0;
+      y_vec[worstSample] = 0;
+      z_vec[worstSample] = 0;
+      pointTrustScore[worstSample] = 0;
+    }
+
     // test how well the new point fits the existing ellipsoid
-    float score;
+    float score = 0.0f;
     float testSample[3] = {sample[0], sample[1], sample[2]};
-    scaleAndScore(&testSample[0], &score);
+    scaleAndScore(&testSample[0], &score, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
 
     float weightedTrustScore = calculateTrust(minDistance, score);
     if (sampleNumber % 10000 == 0 || pointTrustScore[worstSample] <= 0.0f) logger.debug("[%d] Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f | New Point: (%0.2f, %0.2f, %0.2f)", sampleNumber, weightedTrustScore, score, minDistance, worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample], sample[0], sample[1], sample[2]);
 
-    // hard ignore points that deviate from the ellipsoid skin **UNLESS** we are force replacing a bad point
-    if ((score < 0.7 || score > 1.3) && isGoodSoftCal() && pointTrustScore[worstSample] > 0.0f) { return; }
+    // hard ignore points that deviate from the **best** ellipsoid skin **UNLESS** we are force replacing a bad point
+    if ((score < 0.7 || score > 1.3) && isGoodSoftCal(Candidate_M_Ainv) && pointTrustScore[worstSample] > 0.0f) { return; }
     // don't accept bad samples in the first place.
     if (minDistance > averageDistance*5) { return; }
     // if we are force replacing a point, make sure we are accepting a less deviated sample into the array instead of a worse sample
-    if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > 0.15 && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal()) { return; }
+    if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > 0.15 && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal(Candidate_M_Ainv)) { return; }
 
     // See if it is a better point than an existing one
     if ((weightedTrustScore > pointTrustScore[worstSample] || pointTrustScore[worstSample] <= 0.0f) && !freeze) {
-      logger.debug("[%d] Replacing!! Current health: %0.3f, Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f, New Point: (%0.2f, %0.2f, %0.2f) | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f, worst Point: (%0.2f, %0.2f, %0.2f) ", sampleNumber, activeHealth.getHealth(), weightedTrustScore, score, minDistance, sample[0], sample[1], sample[2], worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample], x_vec[worstSample], y_vec[worstSample], z_vec[worstSample]);
+      forceReplaceCount = 0;
+      logger.debug("[%d] Replacing!! Active health: %0.3f, Candidate health: %0.3f, Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f, New Point: (%0.2f, %0.2f, %0.2f) | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f, worst Point: (%0.2f, %0.2f, %0.2f) ", sampleNumber, activeHealth.getHealth(), candidateHealth.getHealth(), weightedTrustScore, score, minDistance, sample[0], sample[1], sample[2], worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample], x_vec[worstSample], y_vec[worstSample], z_vec[worstSample]);
       float oldSample[3] = {x_vec[worstSample], y_vec[worstSample], z_vec[worstSample]}; // for emitSampleAccept
       float newSample[3] = {sample[0], sample[1], sample[2]};
 
@@ -608,28 +742,14 @@ private:
       // }
 
       emitSampleAccept(newSample, oldSample, worstSample); // emit after magneto is updated
-
-      // find the worst fitting sample
-      // consider occasionally tossing out the worst fitting sample so that we can improve fit over time
-      // might backfire if the "bad fitting sample" is actually important to the best sphere fit.
-      float maxError = 0;
-      for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        float pointScore = 0;
-        float checkSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
-        scaleAndScore(checkSample, &pointScore);
-        if (getErrorAmt(pointScore) > maxError) {
-          maxError = getErrorAmt(pointScore);
-        }
-      }
-      logger.debug("Ellipoid calibrated! Max point error: %0.4f", maxError);
     }
   };
 
   // scale with score
-  void scaleAndScore(float* sample, float* score) {
-    // logStatus(); // attempt to log whenever we are scaling a sample c:
-    // require minimum calibration before being ready to serve samples to vqf
-    // if (totalSpread < 10000 || improvementSamples < 200 || (radius < 98 || radius > 102)) {
+  void scaleAndScore(float* sample, float* score, float M_Bias[3], float M_Ainv[3][3], float hm) {
+    *score = 0.0f;
+    // sanity check, don't run if we have not created a calibration yet.
+    if (M_Bias[0] == 0 && M_Bias[1] == 0 && M_Bias[2] == 0) { return; }
     
     float mag_x = sample[0];
     float mag_y = sample[1];
@@ -652,7 +772,7 @@ private:
     // logger.trace("Sample Score: %f", *score);
 
     // // only apply soft iron bias if it is within sane values.
-    if (!isSoftIronOkay) {
+    if (!isGoodSoftCal(Best_M_Ainv)) {
       sample[0] = mag_x;
       sample[1] = mag_y;
       sample[2] = mag_z;
@@ -669,7 +789,7 @@ private:
   const float PENALTY_SCALE = 1.0f / 0.1f; // a deviation of 0.1 will halve the spread score as a penalty
   float calculateTrust(float spreadScore, float deviationScore) {
     float internalScore = deviationScore;
-    if (!isGoodSoftCal()) { internalScore = 1; }
+    if (!isGoodSoftCal(Candidate_M_Ainv)) { internalScore = 1; }
     float deviationNorm = PENALTY_SCALE * (internalScore-1.0f);
     return spreadScore / (1.0f+(deviationNorm*deviationNorm));
   }
@@ -683,9 +803,7 @@ private:
   // the hard iron bias/sphere center
   float totalSpread = 0;
   float radius = 0;
-  float M_Bias[3] = {0.0, 0.0, 0.0};
-  float M_Ainv[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
-  double hm = 0;
+  bool hasBestCalib = false;
 
   int ellipsoidThrottleAttempts = 0;
   void runMagneto() {
@@ -707,19 +825,19 @@ private:
     }
     // logger.debug("}");
     float M_BAinv[4][3];
-    magneto->current_calibration(M_BAinv, &hm);
-    logger.trace("hm: %f", hm);
+    magneto->current_calibration(M_BAinv, &Candidate_hm);
+    // logger.trace("hm: %f", Candidate_hm);
     delete magneto;
 
     // logger.debug("Magneto1.4 calibration: (x: %0.2f, y: %0.2f, z: %0.2f, spread: %0.1f, improvement samples: %d)", M_BAinv[0][0], M_BAinv[0][1], M_BAinv[0][2], getTotalSpread(), improvementSamples);
-    M_Bias[0] = M_BAinv[0][0];
-    M_Bias[1] = M_BAinv[0][1];
-    M_Bias[2] = M_BAinv[0][2];
+    Candidate_M_Bias[0] = M_BAinv[0][0];
+    Candidate_M_Bias[1] = M_BAinv[0][1];
+    Candidate_M_Bias[2] = M_BAinv[0][2];
 
     for (int i = 0; i < 3; i++){
-      M_Ainv[0][i] = M_BAinv[1][i];
-      M_Ainv[1][i] = M_BAinv[2][i];
-      M_Ainv[2][i] = M_BAinv[3][i];
+      Candidate_M_Ainv[0][i] = M_BAinv[1][i];
+      Candidate_M_Ainv[1][i] = M_BAinv[2][i];
+      Candidate_M_Ainv[2][i] = M_BAinv[3][i];
     }
     // logger.debug("Magneto1.4 calibration matrix:");
     // logger.debug("{");
@@ -732,6 +850,8 @@ private:
     //   );
     // }
     // logger.debug("}");
+
+    logger.debug("Candidate Ellipoid calibrated! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
   }
 };
 

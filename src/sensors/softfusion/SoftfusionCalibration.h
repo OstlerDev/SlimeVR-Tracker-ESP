@@ -245,7 +245,7 @@ public:
 	
 	float getMagTimestep() final { return calibration.M_Ts; }
 
-	bool magReady() {
+	bool magHealthy() {
 		return false; // mag only implemented in Runtime Calibration
 	}
 

@@ -286,7 +286,7 @@ public:
 
 	sensor_real_t qwxyz[4]{1.0f, 0.0f, 0.0f, 0.0f};
 	Quat getQuaternionQuat() {
-		if (calibrator.magReady()) {
+		if (calibrator.magHealthy()) {
 			m_fusion.getQuat9D(qwxyz);
 		} else {
 			m_fusion.getQuat6D(qwxyz);

@@ -93,6 +93,10 @@ public:
 			calculateZROChange();
 		}
 
+		magCalibrator.setMBias(activeCalibration.M_Bias);
+		magCalibrator.setMAinv(activeCalibration.M_Ainv);
+		magCalibrator.setHM(activeCalibration.M_hm);
+
 		currentStep = &nullCalibrationStep;
 	}
 
@@ -182,11 +186,34 @@ public:
 
 	float getGyroTimestep() final { return activeCalibration.G_Ts; }
 
-	void scaleMagSample(float* magSample){ magCalibrator.scaleMagSample(magSample); }
+	uint64_t lastMagCalUpdate = 0;
+	void scaleMagSample(float* magSample){ 
+		magCalibrator.scaleMagSample(magSample);
+		if (millis() - lastMagCalUpdate > 5000) {
+			lastMagCalUpdate = millis();
+			// only continue if it has changed
+			if (calibration.M_Bias[0] == magCalibrator.Best_M_Bias[0]
+				&& calibration.M_Bias[1] == magCalibrator.Best_M_Bias[1]
+				&& calibration.M_Bias[2] == magCalibrator.Best_M_Bias[2]
+			) { return; }
+
+			calibration.M_Bias[0] = magCalibrator.Best_M_Bias[0];
+			calibration.M_Bias[1] = magCalibrator.Best_M_Bias[1];
+			calibration.M_Bias[2] = magCalibrator.Best_M_Bias[2];
+			for (int i = 0; i < 3; i++) {
+				calibration.M_Ainv[0][i] = magCalibrator.Best_M_Ainv[0][i];
+				calibration.M_Ainv[1][i] = magCalibrator.Best_M_Ainv[1][i];
+				calibration.M_Ainv[2][i] = magCalibrator.Best_M_Ainv[2][i];
+			}
+			calibration.M_hm = magCalibrator.Best_hm;
+			saveCalibration();
+			printCalibration(CalibrationPrintFlags::MAG_CAL);
+		}
+	}
 
 	float getMagTimestep() final { return activeCalibration.M_Ts; }
 
-	bool magReady() { return magCalibrator.magReady(); }
+	bool magHealthy() { return magCalibrator.magHealthy(); }
 
 	float getTempTimestep() final { return activeCalibration.T_Ts; }
 
@@ -331,11 +358,13 @@ private:
 		MOTIONLESS = 2,
 		GYRO_BIAS = 4,
 		ACCEL_BIAS = 8,
+		MAG_CAL = 16,
 	};
 
 	static constexpr CalibrationPrintFlags PrintAllCalibration
 		= CalibrationPrintFlags::TIMESTEPS | CalibrationPrintFlags::MOTIONLESS
-		| CalibrationPrintFlags::GYRO_BIAS | CalibrationPrintFlags::ACCEL_BIAS;
+		| CalibrationPrintFlags::GYRO_BIAS | CalibrationPrintFlags::ACCEL_BIAS
+		| CalibrationPrintFlags::MAG_CAL;
 
 	void printCalibration(CalibrationPrintFlags toPrint = PrintAllCalibration) {
 		if (any(toPrint & CalibrationPrintFlags::TIMESTEPS)) {
@@ -403,6 +432,30 @@ private:
 				logger.info("Accel bias not calibrated");
 			}
 		}
+
+		if (any(toPrint & CalibrationPrintFlags::MAG_CAL)) {
+			if (calibration.M_Bias[0] == 0 && calibration.M_Bias[1] == 0 && calibration.M_Bias[2] == 0) {
+				logger.info("Mag not calibrated yet, will calibrate automatically during use");
+			} else {
+				logger.info(
+					"Calibrated mag hard-iron bias: [%f, %f, %f] (hm: %f)",
+					calibration.M_Bias[0],
+					calibration.M_Bias[1],
+					calibration.M_Bias[2],
+					calibration.M_hm
+				);
+				logger.info("Calibrated mag soft-iron ellipsoid: [");
+				for (int i = 0; i < 3; i++) {
+					logger.info(
+						"    [%f, %f, %f],",
+						calibration.M_Ainv[0][i],
+						calibration.M_Ainv[1][i],
+						calibration.M_Ainv[2][i]
+					);
+				}
+				logger.info("]");
+			}
+		}
 	}
 
 	CalibrationStepEnum nextCalibrationStep = CalibrationStepEnum::SAMPLING_RATE;
@@ -452,6 +505,10 @@ private:
 
 		.accelCalibrated = {false, false, false},
 		.A_off = {0.0, 0.0, 0.0},
+
+		.M_Bias = {0.0, 0.0, 0.0},
+		.M_Ainv = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}},
+		.M_hm = 100
 	};
 
 	float activeZROChange = 0;
