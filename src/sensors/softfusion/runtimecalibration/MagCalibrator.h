@@ -712,7 +712,7 @@ private:
       forceReplaceCount = 0;
       // Wipe out part of the point cloud to force reconvergence
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        if (i % 2 == 0) continue; // skip every other
+        if (i % params.CleaningInterval != 0) continue;
         x_vec[i] = 0;
         y_vec[i] = 0;
         z_vec[i] = 0;
