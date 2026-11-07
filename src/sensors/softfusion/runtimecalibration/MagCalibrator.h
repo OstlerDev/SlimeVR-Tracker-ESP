@@ -412,7 +412,7 @@ private:
         currentWorst = pointTrustScore[i];
         worstSample = i;
       }
-      if (pointDeviation[i] > worstErrorScore) {
+      if (getErrorAmt(pointDeviation[i]) > worstErrorScore) {
         worstErrorScore = pointDeviation[i];
         worstErrorSample = i;
       }
@@ -519,7 +519,7 @@ private:
     float z = M_Ainv[2][2];
 
     float min = params.GoodSoftCalMajorMinimum;
-    float max = params.GoodSoftCalMajorMinimum;
+    float max = params.GoodSoftCalMajorMaximum;
     float mmult = params.GoodSoftCalMajorMultiplier;
     float dmult = params.GoodSoftCalDiagMultiplier;
     if (x < min || y < min || z < min || x > max || y > max || z > max) {
@@ -618,7 +618,7 @@ private:
 
       // Wipe out part of the point cloud to force reconvergence of calibration
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        if (i % params.CleaningInterval == 0) continue; // clear out every X datapoint
+        if (i % params.CleaningInterval != 0) continue; // clear out every X datapoint
         x_vec[i] = 0;
         y_vec[i] = 0;
         z_vec[i] = 0;
@@ -710,7 +710,7 @@ private:
     if (forceReplaceCount > params.ForceRemoveMaxRetries) {
       logger.debug("Force replacing stuck in bad state, wiping half of the point cloud to clear bad state...");
       forceReplaceCount = 0;
-      // Wipe out 1/2rd of the point cloud to force reconvergence
+      // Wipe out part of the point cloud to force reconvergence
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
         if (i % 2 == 0) continue; // skip every other
         x_vec[i] = 0;
