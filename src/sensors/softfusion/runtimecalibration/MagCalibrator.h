@@ -691,7 +691,7 @@ private:
 
       recalculateMinDistance(); // recalculates distance
       if (countEmpty() == 0) {
-        runMagneto();
+        runMagneto(true);
         recalculateTrustScores();
         // force log first calibration
         logCalibration();
@@ -773,9 +773,9 @@ private:
 
   // the hard iron bias/sphere center
   int ellipsoidThrottleAttempts = 0;
-  void runMagneto() {
+  void runMagneto(bool forceCreate = false) {
     // throttle how frequently the magneto algorithm is run (points are still adjusted)
-    if (millis() - lastEllipsoidCreate <= params.ThrottleEllipsoidCalculation) { 
+    if (millis() - lastEllipsoidCreate <= params.ThrottleEllipsoidCalculation && !forceCreate) { 
       ellipsoidThrottleAttempts++;
       logger.debug("Throttling Ellipsoid creation! Throttled %d times during this period.", ellipsoidThrottleAttempts);
       return; 
