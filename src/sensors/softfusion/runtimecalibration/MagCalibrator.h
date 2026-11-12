@@ -77,11 +77,13 @@ struct MagCalParams {
   float HealthMovementThreshold = 3.0f;
   /* The health threshold for mag to be determined to be healthy, controls when 9D fusion is used */
   float MagHealthyThreshold = 0.9f;
+  /* How long the mag needs to be in a healthy state before it will be used for fusion */
+  int MagHealthyDuration = 2 * 60 * 1000;
 
   /* The delay on startup before points will start to be collected */
-  int StartupCollectionDelay = 0 * 1000;
+  int StartupCollectionDelay = 120 * 1000;
   /* How frequently we should log all of the calibration data for debugging */
-  int LogDumpFrequency = 15 * 1000;
+  int LogDumpFrequency = 30 * 1000;
 
   /* How frequently should we test incoming samples to determine if we should add them to our point cloud */
   int SampleFrequency = 10;
@@ -167,11 +169,23 @@ public:
     }
   }
 
-  // Should we start using 9D fusion outputs or keep using 6D fusion.
-  // We still pass mag data to VQF, this is just if we utilize it or not.
+  // Enables/Disables VQF 9D fusion by disabling delta changes.
   bool magHealthy() { 
-    return activeHealth.getHealth() > params.MagHealthyThreshold;
-    // return vqfHasBeenHealthy; // check if vqf has found a mag heading or not
+    fusion->setMagCalibrationHealthy(true);
+    // once the calibration is healthy 
+    if (activeHealth.getHealth() > params.MagHealthyThreshold) { 
+      if (magIsHealthy) { return true; }
+      // magHasBeenHealthy = true; 
+      /* TODO: Consider only counting up time when movement is occuring similar to how VQF handles candidate time */
+      if (millis() - magHealthySince > params.MagHealthyDuration) {
+        magIsHealthy = true;
+        return true;
+      }
+    } else { 
+      magHealthySince = millis(); // set to current time repeatedly until it is healthy (so relative comparisons against current millis are accurate)
+      magIsHealthy = false;
+    }
+    return false; 
   }
   bool vqfReady() { return vqfHasBeenHealthy; }
 
