@@ -104,6 +104,9 @@ struct MagCalParams {
   /* The minimum amount of health that is required for a candidate to be promoted. Lower values encourages more frequent */
   /* reconvergence during calibration warmup, higher values make the first promotion wait longer. Lower values are recommended. */
   float CandidateMinPromotionHealth = 0.2f;
+  /* How much better should the candidate be required to be than the currently accepted best. Prevents flipping to a new candidate */
+  /* when it is just as good as the current best. */
+  float CandidateImprovementMinimum = 0.05f;
   /* After promoting a candidate calibration what should we reset the candidate health to? */
   float CandidateHealthAfterPromotion = 0.0f;
   /* The frequency that points will be removed after candidate promotion. This clears out the array to force reconvergence, allowing */
@@ -587,6 +590,7 @@ private:
       !doCalibrationsMatch() 
       && activeHealth.getHealth() < candidateHealth.getHealth() 
       && candidateHealth.getHealth() > params.CandidateMinPromotionHealth
+      && candidateHealth.getHealth() - activeHealth.getHealth() >= params.CandidateImprovementMinimum
       && betterSoftCal
     ) {
       logger.debug("Promoting Candidate Ellipsoid to Best Ellipsoid! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
