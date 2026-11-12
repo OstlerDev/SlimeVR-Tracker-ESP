@@ -54,7 +54,7 @@ public:
 private:
   const int HEALTH_WINDOW = 2000;
   const float SMOOTHING_FACTOR = 2.0f/(HEALTH_WINDOW+1);
-  const int ERROR_SCALER = 5;
+  const float ERROR_SCALER = 1.0f;
   float health = 0.0f;
 
   // returns 0-1 based on the sample health (1 being healthy, 0 being very bad)
@@ -66,7 +66,7 @@ private:
       errorAmount = deviationScore-1.0f;
     }
     if (errorAmount >= 1) return 0;
-    return 1.0f - errorAmount;
+    return 1.0f - (errorAmount * ERROR_SCALER);
   }
 };
 
@@ -101,15 +101,14 @@ struct MagCalParams {
   /* clean the bad point cloud by wiping a portion of the point cloud and wipe the bad point */
   int ForceRemoveMaxRetries = 100;
 
-
   /* The minimum amount of health that is required for a candidate to be promoted. Lower values encourages more frequent */
   /* reconvergence during calibration warmup, higher values make the first promotion wait longer. Lower values are recommended. */
   float CandidateMinPromotionHealth = 0.2f;
   /* After promoting a candidate calibration what should we reset the candidate health to? */
-  float CandidateHealthAfterPromotion = 0.0f;  
-  /* When wiping part of the point cloud, how many points should we remove? This is performed after a candidate is */
-  /* accepted as well as when forcing cleanup fails */
-  int CleaningInterval = 2; // clear out every second datapoint
+  float CandidateHealthAfterPromotion = 0.0f;
+  /* The frequency that points will be removed after candidate promotion. This clears out the array to force reconvergence, allowing */
+  /* a chance for possible bad datapoints to be removed. */
+  int CleaningInterval = 2; 
 
   /* Soft Calibration Requirements to be deemed healthy. Stops unhealthy ellipsoids from "locking in" too early. */
   /* Once a soft calibration is determined to be healthy we start restricting new point deviation from surface. */
@@ -131,7 +130,7 @@ public:
     activeHealth.setHealth(params.StartHealth);
   }
 
-  // public because returning them is annoying...
+  // public because returning them is annoying until we move this to a struct...
   float Best_M_Bias[3] = {0.0f, 0.0f, 0.0f};
   float Best_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
   double Best_hm = 100;
@@ -139,18 +138,11 @@ public:
   float Candidate_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
   double Candidate_hm = 100;
 
-  bool freeze = false;
   void scaleMagSample(float* sample) {
     if (sample[0] == 0 && sample[1] == 0 && sample[2] == 0) { return; }
     sampleNumber++;
-    logStatus();
-#if BENCHMARK_MAG_CALIBRATOR
-    magCalibrateBM.before();
-#endif
-    provideMagSample(sample); // add to calibration if needed
-#if BENCHMARK_MAG_CALIBRATOR
-    magCalibrateBM.after();
-#endif
+    tick(); // run all background updates required
+    provideMagSample(sample);
 
     float movementFromLast = calculateDistance(sample[0], lastSample[0], sample[1], lastSample[1], sample[2], lastSample[2]);
     lastSample[0] = sample[0];
@@ -161,6 +153,7 @@ public:
     scaleAndScore(sample, &score, Best_M_Bias, Best_M_Ainv, Best_hm);
 
     // only adjust health when movement is detected (don't improve health for sitting still)
+    // consider requiring health to span a percentage of the sphere to calculate full 3d excitation.
     if (movementFromLast > params.HealthMovementThreshold){
       activeHealth.addSample(score);
 
@@ -202,7 +195,7 @@ public:
     float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
     return totalDisturbedTime + disturbedFor;
   }
-  // // Will run this function if provided when new points are accepted into the calibration, useful for debugging/recording logs
+  // Will run this function if provided when new points are accepted into the calibration, useful for debugging/recording logs
   void onSampleAccept(std::function<void(float[3], float[3], int)>&& callback) {
     sampleAcceptCallback = callback;
   }
@@ -215,6 +208,12 @@ private:
   Logging::Logger logger{"MagCalibrator"};
   VQF* fusion; // reference to vqf for direct access
   MagCalParams params;
+
+  // run background updates required.
+  void tick() {
+    magHealthy();
+    logStatus();
+  }
 
   // calls function with (float* newSample, float* oldSample)
   std::optional<std::function<void(float[3], float[3], int)>> sampleAcceptCallback;
@@ -229,12 +228,14 @@ private:
 
   uint64_t lastEllipsoidCreate = 0;
 
-  bool calibrationReady = false;
+  bool magReady = false;
+  bool magIsHealthy = false;
+  long magHealthySince = 0;
   bool isSoftIronOkay = false;
   float lastSample[3] = {0.0f, 0.0f, 0.0f};
 
   uint64_t startTime = 0;
-  bool startCalibration = true;
+  bool startCalibration = false;
   uint64_t lastLogTime = 0;
   uint64_t sampleNumber = 0;
   void logStatus(bool forcePrint = false){
@@ -252,11 +253,11 @@ private:
       const VQFState& vqfState = fusion->getState();
       float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
       logger.debug("[%d] VQF: Healthy Duration: %0.2f (current accepted mag field: norm %0.4f, dip %0.4f) Disturbed duration: %0.1f (candidate mag field: time %0.2f, norm %0.4f, dip %0.4f)", sampleNumber, vqfState.magUndisturbedT, vqfState.magRefNorm, vqfState.magRefDip, disturbedFor, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
-      logger.debug("Active calibration health: %0.3f, Candidate calibration health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
+      logger.debug("Active calibration health: %0.3f (magIsHealthy %d, magHealthyTime: %0.2f), Candidate calibration health: %0.3f", activeHealth.getHealth(), magIsHealthy, (millis() - magHealthySince) / 1000.0f, candidateHealth.getHealth());
       
       // log current best
-      logger.debug("Best Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Best_M_Bias[0], Best_M_Bias[1], Best_M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
-      logger.debug("Best Magneto1.4 calibration matrix:");
+      logger.debug("Best Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Best_M_Bias[0], Best_M_Bias[1], Best_M_Bias[2], Best_hm, getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Best Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Best_M_Ainv));
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
@@ -269,8 +270,8 @@ private:
       logger.debug("}");
 
       // log current candidate
-      logger.debug("Candidate Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Candidate_M_Bias[0], Candidate_M_Bias[1], Candidate_M_Bias[2], getTotalSpread(), getErrorTotal(), improvementSamples);
-      logger.debug("Candidate Magneto1.4 calibration matrix:");
+      logger.debug("Candidate Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Candidate_M_Bias[0], Candidate_M_Bias[1], Candidate_M_Bias[2], Candidate_hm, getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Candidate Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Candidate_M_Ainv));
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
@@ -285,7 +286,7 @@ private:
       // log point cloud
       logger.debug("Point Cloud: {");
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        logger.debug("  [%0.4f, %0.4f, %0.4f],", x_vec[i], y_vec[i], z_vec[i]);
+        logger.debug("  [%0.4f, %0.4f, %0.4f],       (err: %0.3f)", x_vec[i], y_vec[i], z_vec[i], getErrorAmt(pointDeviation[i]));
       }
       logger.debug("}");
     }
@@ -318,8 +319,6 @@ private:
     mag_z -= M_Bias[2];
 
     // apply soft iron
-    // @TODO: Consider not applying soft-iron until we are within a normal ellipsoid shape (not blown out on any axis)
-    //        or consider having trust for each of the axies seperately? idk.
     float cx = M_Ainv[0][0] * mag_x + M_Ainv[0][1] * mag_y + M_Ainv[0][2] * mag_z;
     float cy = M_Ainv[1][0] * mag_x + M_Ainv[1][1] * mag_y + M_Ainv[1][2] * mag_z;
     float cz = M_Ainv[2][0] * mag_x + M_Ainv[2][1] * mag_y + M_Ainv[2][2] * mag_z;
@@ -327,16 +326,16 @@ private:
     float clength = sqrtf(cx * cx + cy * cy + cz * cz);
     *score = clength / hm;
 
-    // only apply soft iron bias if it is within sane values.
-    if (!isGoodSoftCal(Best_M_Ainv)) {
-      sample[0] = mag_x;
-      sample[1] = mag_y;
-      sample[2] = mag_z;
+    // only apply soft iron bias if it is within sane values
+    if (isGoodSoftCal(M_Ainv)) {
+      sample[0] = cx;
+      sample[1] = cy;
+      sample[2] = cz;
       return;
     }
-    sample[0] = cx;
-    sample[1] = cy;
-    sample[2] = cz;
+    sample[0] = mag_x;
+    sample[1] = mag_y;
+    sample[2] = mag_z;
   }
 
   void resetCalibration(){
@@ -576,11 +575,6 @@ private:
     samplerDelay++;
     if (samplerDelay % params.SampleFrequency != 0) { return; }
     samplerDelay = 0;
-
-    if (freeze) {
-      return;
-    }
-
     
     // If we have a best calibration, and that best calibration has a good soft calibration, don't get rid of it in favor of a soft
     // calibration that is not a good soft calibration. Don't toss out good for bad.
@@ -629,56 +623,54 @@ private:
       candidateHealth.setHealth(0.0f);
     }
 
-    // Ignore new samples if mag is disturbed
-    if (calibrationReady) {
-      const VQFState& vqfState = fusion->getState();
-      if (vqfState.magDistDetected && vqfState.kMagInit != 1) {
-        // Log duration that we were healthy!
-        if (healthyDuration > 0) {
-          logger.debug("[%d] VQF: Mag is now disturbed! Was healthy for: %0.2f (current accepted mag field: norm %0.4f, dip: %0.4f)", sampleNumber, healthyDuration, vqfState.magRefNorm, vqfState.magRefDip);
-          totalHealthyTime += healthyDuration;
-          healthyDuration = 0;
-        }
-        // Consider also tossing out any samples added to the array in the last 0.5 seconds
-        // in case any bad samples have snuck in before VQF could trigger mag disturbance rejections
-
-        // NOTE! Mag disturbance detection DOES NOT handle if a magnet is brought close by but doesn't change the
-        // angle. We /might/ still want some way to detect if the sensor readings spiked out of reasonable ranges.
-        // ignore provided sample
-        // only start ignoring once VQF has been undisturbed a single time
-        if (vqfHasBeenHealthy) {
-          if (sampleNumber % 10000 == 0) {
-            float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
-            logger.debug("[%d] VQF: Mag is Disturbed! Disturbed duration: %0.1f (new candidate: time %0.2f, norm %0.4f, dip: %0.4f)", sampleNumber, disturbedFor, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
-          }
-          disturbedDuration = vqfState.magRejectT;
-
-          // Don't ignore incoming points by using VQF as the rejector. Good idea in theory, bad in practice. Too many points get
-          // rejected which slows down convergence on good calibrations because VQF does not know the correct mag vector.
-          // // If we have a healthy calibration, then listen to vqf and ignore the sample, otherwise, keep processing
-          // // this filters out momentary disturbances, but allows updating when the disturbance is consistent.
-          // // There is a chance that VQF will report disturbances before we have a good soft-iron calibration, and the
-          // // disturbance reporting can filter out points that we need to add into our point cloud.
-          // if (activeHealth.getHealth() > 0.92) {
-          //   return;
-          // }
-        } else {
-          if (sampleNumber % 10000 == 0) logger.debug("[%d] VQF: Calibrating for the first time (current candidate: time %0.2f, norm %0.4f, dip: %0.4f)", sampleNumber, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
-        }
-      } else {
-        long timeNow = millis();
-        if (!vqfHasBeenHealthy) logger.info("[%d] VQF: Accepted mag heading for first time! Active calibration health: %0.3f, Candidate calibration health: %0.3f, Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, activeHealth.getHealth(), candidateHealth.getHealth(), vqfState.magRefNorm, vqfState.magRefDip);
-        if (disturbedDuration > 0) {
-          float disturbedFor = (timeNow - lastHealthyTime) / 1000.0f;
-          logger.debug("[%d] VQF: Mag is now healthy again! Was disturbed for: %0.2f (current accepted mag field: norm %0.4f, dip: %0.4f)", sampleNumber, disturbedFor, vqfState.magRefNorm, vqfState.magRefDip);
-          totalDisturbedTime += disturbedFor;
-          disturbedDuration = 0;
-        }
-        lastHealthyTime = timeNow;
-        vqfHasBeenHealthy = true;
-        if (sampleNumber % 10000 == 0) logger.debug("[%d] VQF: Mag is healthy :3! Healthy duration: %0.2f, lastMagDisAngle: %0.2f,  Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, vqfState.magUndisturbedT, vqfState.lastMagDisAngle, vqfState.magRefNorm, vqfState.magRefDip);
-        healthyDuration = vqfState.magUndisturbedT;
+    // Debug with VQF State.
+    const VQFState& vqfState = fusion->getState();
+    if (vqfState.magDistDetected && vqfState.kMagInit != 1) {
+      // Log duration that we were healthy!
+      if (healthyDuration > 0) {
+        logger.debug("[%d] VQF: Mag is now disturbed! Was healthy for: %0.2f (current accepted mag field: norm %0.4f, dip: %0.4f)", sampleNumber, healthyDuration, vqfState.magRefNorm, vqfState.magRefDip);
+        totalHealthyTime += healthyDuration;
+        healthyDuration = 0;
       }
+      // Consider also tossing out any samples added to the array in the last 0.5 seconds
+      // in case any bad samples have snuck in before VQF could trigger mag disturbance rejections
+
+      // NOTE! Mag disturbance detection DOES NOT handle if a magnet is brought close by but doesn't change the
+      // angle. We /might/ still want some way to detect if the sensor readings spiked out of reasonable ranges.
+      // ignore provided sample
+      // only start ignoring once VQF has been undisturbed a single time
+      if (vqfHasBeenHealthy) {
+        if (sampleNumber % 10000 == 0) {
+          float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
+          logger.debug("[%d] VQF: Mag is Disturbed! Disturbed duration: %0.1f (new candidate: time %0.2f, norm %0.4f, dip: %0.4f)", sampleNumber, disturbedFor, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
+        }
+        disturbedDuration = vqfState.magRejectT;
+
+        // Don't ignore incoming points by using VQF as the rejector. Good idea in theory, bad in practice. Too many points get
+        // rejected which slows down convergence on good calibrations because VQF does not know the correct mag vector.
+        // // If we have a healthy calibration, then listen to vqf and ignore the sample, otherwise, keep processing
+        // // this filters out momentary disturbances, but allows updating when the disturbance is consistent.
+        // // There is a chance that VQF will report disturbances before we have a good soft-iron calibration, and the
+        // // disturbance reporting can filter out points that we need to add into our point cloud.
+        // if (activeHealth.getHealth() > 0.92) {
+        //   return;
+        // }
+      } else {
+        if (sampleNumber % 10000 == 0) logger.debug("[%d] VQF: Calibrating for the first time (current candidate: time %0.2f, norm %0.4f, dip: %0.4f)", sampleNumber, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
+      }
+    } else {
+      long timeNow = millis();
+      if (!vqfHasBeenHealthy) logger.info("[%d] VQF: Accepted mag heading for first time! Active calibration health: %0.3f, Candidate calibration health: %0.3f, Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, activeHealth.getHealth(), candidateHealth.getHealth(), vqfState.magRefNorm, vqfState.magRefDip);
+      if (disturbedDuration > 0) {
+        float disturbedFor = (timeNow - lastHealthyTime) / 1000.0f;
+        logger.debug("[%d] VQF: Mag is now healthy again! Was disturbed for: %0.2f (current accepted mag field: norm %0.4f, dip: %0.4f)", sampleNumber, disturbedFor, vqfState.magRefNorm, vqfState.magRefDip);
+        totalDisturbedTime += disturbedFor;
+        disturbedDuration = 0;
+      }
+      lastHealthyTime = timeNow;
+      vqfHasBeenHealthy = true;
+      if (sampleNumber % 10000 == 0) logger.debug("[%d] VQF: Mag is healthy :3! Healthy duration: %0.2f, lastMagDisAngle: %0.2f,  Accepted candidate norm: %0.4f, dip: %0.4f", sampleNumber, vqfState.magUndisturbedT, vqfState.lastMagDisAngle, vqfState.magRefNorm, vqfState.magRefDip);
+      healthyDuration = vqfState.magUndisturbedT;
     }
 
     // first check if there are any still empty
@@ -703,6 +695,9 @@ private:
       return;
     }
 
+#if BENCHMARK_MAG_CALIBRATOR
+    magCalibrateBM.before();
+#endif
     // if there are not any empty slots, check if we are better than the worst sample, if so, replace it.
     int worstSample = getWorstSample();
 
@@ -740,7 +735,7 @@ private:
     if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > params.ForceRemoveDeviation && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal(Candidate_M_Ainv)) { return; }
 
     // See if it is a better point than an existing one
-    if ((weightedTrustScore > pointTrustScore[worstSample] || pointTrustScore[worstSample] <= 0.0f) && !freeze) {
+    if ((weightedTrustScore > pointTrustScore[worstSample] || pointTrustScore[worstSample] <= 0.0f)) {
       forceReplaceCount = 0;
       logger.debug("[%d] Replacing!! Active health: %0.3f, Candidate health: %0.3f, Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f, New Point: (%0.2f, %0.2f, %0.2f) | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f, worst Point: (%0.2f, %0.2f, %0.2f) ", sampleNumber, activeHealth.getHealth(), candidateHealth.getHealth(), weightedTrustScore, score, minDistance, sample[0], sample[1], sample[2], worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample], x_vec[worstSample], y_vec[worstSample], z_vec[worstSample]);
       float oldSample[3] = {x_vec[worstSample], y_vec[worstSample], z_vec[worstSample]}; // for emitSampleAccept
@@ -756,6 +751,7 @@ private:
       
       // use magneto
 #if BENCHMARK_MAG_CALIBRATOR
+      magCalibrateBM.after(); // stop before magneto
       magnetoCalculateBM.before();
 #endif
       runMagneto();
@@ -763,9 +759,11 @@ private:
       magnetoCalculateBM.after();
 #endif
 
-      calibrationReady = true;
-
       emitSampleAccept(newSample, oldSample, worstSample); // emit after magneto is updated
+    } else {
+#if BENCHMARK_MAG_CALIBRATOR
+      magCalibrateBM.after();
+#endif
     }
   };
 
