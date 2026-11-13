@@ -303,7 +303,7 @@ struct VQFParams {
 	 *
 	 * Default value: 2.0
 	 */
-	vqf_real_t magRejectionFactor = 2.0;
+	vqf_real_t magRejectionFactor = 1000.0;
 };
 
 /**
