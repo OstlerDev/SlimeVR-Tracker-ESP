@@ -79,6 +79,13 @@ struct MagCalibration {
   };
   double hm = 100;
 };
+struct MagSampleChange {
+  float newSample[3];
+  float oldSample[3];
+  int index;
+  long timestamp;
+};
+
 struct MagCalParams {
   /* The initial health for the Best calibration, higher values speed up the "warmup" of saved calibrations */
   float StartHealth = 0.6f;
@@ -223,10 +230,9 @@ public:
     float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
     return totalDisturbedTime + disturbedFor;
   }
-  // Will run this function if provided when new points are accepted into the calibration, useful for debugging/recording logs
-  void onSampleAccept(std::function<void(float[3], float[3], int)>&& callback) {
-    sampleAcceptCallback = callback;
-  }
+  void onNewBest(std::function<void(MagCalibration, long)>&& callback) { newBestCallback = callback; }
+  void onNewCandidate(std::function<void(MagCalibration, long)>&& callback) { newCandidateCallback = callback; }
+  void onSampleAccept(std::function<void(MagSampleChange)>&& callback) { sampleAcceptCallback = callback; }
 
 private:
 #if BENCHMARK_MAG_CALIBRATOR
@@ -246,11 +252,24 @@ private:
     logStatus();
   }
 
-  // calls function with (float* newSample, float* oldSample)
-  std::optional<std::function<void(float[3], float[3], int)>> sampleAcceptCallback;
+  std::optional<std::function<void(MagCalibration, long)>> newBestCallback;
+  void emitNewBest(){ 
+    if (newBestCallback) (*newBestCallback)(Best, millis()); 
+  }
+  std::optional<std::function<void(MagCalibration, long)>> newCandidateCallback;
+  void emitNewCandidate(){ 
+    if (newCandidateCallback) (*newCandidateCallback)(Candidate, millis()); 
+  }
+  std::optional<std::function<void(MagSampleChange)>> sampleAcceptCallback;
   void emitSampleAccept(float newSample[3], float oldSample[3], int index){
     if (sampleAcceptCallback) {
-      (*sampleAcceptCallback)(newSample, oldSample, index);
+      MagSampleChange changed{
+        .newSample = {newSample[0], newSample[1], newSample[2]},
+        .oldSample = {oldSample[0], oldSample[1], oldSample[2]},
+        .index = index,
+        .timestamp = millis()
+      };
+      (*sampleAcceptCallback)(changed);
     }
   }
 
@@ -601,13 +620,17 @@ private:
     ) {
       logger.debug("Promoting Candidate Ellipsoid to Best Ellipsoid! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
       Best = Candidate;
+      emitNewBest();
       // Wipe out part of the point cloud to force reconvergence of calibration
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
         if (i % params.CleaningInterval != 0) continue; // clear out every X datapoint
+        float oldSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
         x_vec[i] = 0;
         y_vec[i] = 0;
         z_vec[i] = 0;
         pointTrustScore[i] = 0;
+        float newSample[3] = {0.0f, 0.0f, 0.0f};
+        emitSampleAccept(newSample, oldSample, i);
       }
 
       // Reset candidate health to make the new candidate prove it's healthy over a new time period.
@@ -683,6 +706,8 @@ private:
         // force log first calibration
         logCalibration();
       }
+      float oldSample[3] = {0.0f, 0.0f, 0.0f};
+      emitSampleAccept(sample, oldSample, emptyIndex);
       return;
     }
 
@@ -699,10 +724,13 @@ private:
       // Wipe out part of the point cloud to force reconvergence
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
         if (i % params.CleaningInterval != 0) continue;
+        float oldSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
         x_vec[i] = 0;
         y_vec[i] = 0;
         z_vec[i] = 0;
         pointTrustScore[i] = 0;
+        float newSample[3] = {0.0f, 0.0f, 0.0f};
+        emitSampleAccept(newSample, oldSample, i);
       }
       x_vec[worstSample] = 0;
       y_vec[worstSample] = 0;
@@ -757,7 +785,7 @@ private:
       magnetoCalculateBM.after();
 #endif
 
-      emitSampleAccept(newSample, oldSample, worstSample); // emit after magneto is updated
+      emitSampleAccept(newSample, oldSample, worstSample);
     } else {
 #if BENCHMARK_MAG_CALIBRATOR
       magCalibrateBM.after();
@@ -796,6 +824,7 @@ private:
       Candidate.M_Ainv[2][i] = M_BAinv[3][i];
     }
 
+    emitNewCandidate();
     logger.debug("Candidate Ellipoid calibrated! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
   }
 };
