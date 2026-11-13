@@ -338,6 +338,12 @@ void VQF::updateMag(const vqf_real_t mag[3])
         }
     }
 
+    // Don't allow changes if calibration is deemed to be unhealthy
+    // this mimicks how mag ref disturbances disable updates.
+    if (!state.magCalibrationHealthy) {
+        k = 0;
+    }
+
     // ensure fast initial convergence
     if (state.kMagInit != vqf_real_t(0.0)) {
         // make sure that the gain k is at least 1/N, N=1,2,3,... in the first few samples
@@ -366,11 +372,23 @@ void VQF::updateMag(const vqf_real_t mag[3])
         state.delta += vqf_real_t(2*M_PI);
     }
 
-    if (!state.setMagStartupDelta) {
-        state.setMagStartupDelta = true;
-        state.magStartupDelta = state.delta;
-        state.kMagInit = 0;
-    }
+    // We shouldn't need this since the delta should be zeroed out until mag is healthy.
+    // if (state.needsMagDeltaOffset) {
+    //     state.needsMagDeltaOffset = false;
+    //     state.magDeltaOffset = state.delta;
+    // }
+}
+
+void VQF::setMagCalibrationHealthy(bool calHealthy) {
+    state.magCalibrationHealthy = calHealthy;
+}
+
+void VQF::setNeedsMagDeltaOffset(bool needsOffset) {
+    state.needsMagDeltaOffset = needsOffset;
+}
+
+void VQF::updateMagDeltaOffset() {
+    state.magDeltaOffset = state.delta;
 }
 
 void VQF::getQuat3D(vqf_real_t out[4]) const
@@ -386,7 +404,7 @@ void VQF::getQuat6D(vqf_real_t out[4]) const
 void VQF::getQuat9D(vqf_real_t out[4]) const
 {
     quatMultiply(state.accQuat, state.gyrQuat, out);
-    quatApplyDelta(out, state.delta - state.magStartupDelta, out);
+    quatApplyDelta(out, state.delta /*- state.magDeltaOffset*/, out);
 }
 
 vqf_real_t VQF::getDelta() const
@@ -610,6 +628,9 @@ void VQF::resetState()
     state.magCandidateT = 0.0;
     std::fill(state.magNormDip, state.magNormDip + 2, 0);
     std::fill(state.magNormDipLpState, state.magNormDipLpState + 2*2, NaN);
+    state.magCalibrationHealthy = false;
+    state.needsMagDeltaOffset = true;
+    state.magDeltaOffset = 0.0;
 }
 
 void VQF::quatMultiply(const vqf_real_t q1[4], const vqf_real_t q2[4], vqf_real_t out[4])

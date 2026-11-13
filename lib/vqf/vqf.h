@@ -338,10 +338,12 @@ struct VQFState {
 	 */
 	vqf_real_t delta;
 	/**
-	 * The heading offset at the time of magnetometer enable
+	 * @brief The heading offset to apply during 9D sensor fusion
+	 * 
+	 * Helpful to prevent instant snapping to mag header if you are switching from 6D to 9D fusion.
 	 */
-	vqf_real_t magStartupDelta;
-	bool setMagStartupDelta;
+	vqf_real_t needsMagDeltaOffset;
+	vqf_real_t magDeltaOffset;
 	/**
 	 * @brief True if it has been detected that the IMU is currently at rest.
 	 *
@@ -352,6 +354,10 @@ struct VQFState {
 	 * @brief True if magnetic disturbances have been detected.
 	 */
 	bool magDistDetected;
+	/**
+	 * @brief True if the mag calibration is determined to be healthy.
+	 */
+	bool magCalibrationHealthy;
 
 	/**
 	 * @brief Last low-pass filtered acceleration in the \f$\mathcal{I}_i\f$ frame.
@@ -867,6 +873,18 @@ public:
 	 * @brief Enables/disables magnetic disturbance detection and rejection.
 	 */
 	void setMagDistRejectionEnabled(bool enabled);
+	/**
+	 * @brief Enables/disables mag angle changes based on the calibration health.
+	 */
+	void setMagCalibrationHealthy(bool magCalibrationHealthy);
+	/**
+	 * @brief Will update magDeltaOffset on the next cycle that a mag sample is provided.
+	 */
+	void setNeedsMagDeltaOffset(bool needsOffset);
+	/**
+	 * @brief Sets the magStartupDelta to allow it to be set the next time 9D sensor fusion occurs.
+	 */
+	void updateMagDeltaOffset();
 	/**
 	 * @brief Sets the current thresholds for rest detection.
 	 *

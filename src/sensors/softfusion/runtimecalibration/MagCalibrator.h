@@ -179,11 +179,15 @@ public:
       /* TODO: Consider only counting up time when movement is occuring similar to how VQF handles candidate time */
       if (millis() - magHealthySince > params.MagHealthyDuration) {
         magIsHealthy = true;
+        // update the offset when we are healthy again to prevent snapping to new angle
+        fusion->setMagCalibrationHealthy(true);
+        // fusion->setNeedsMagDeltaOffset(true); // not needed since we have mag delta changes disabled in the same way that vqf disturbance disabling works.
         return true;
       }
     } else { 
       magHealthySince = millis(); // set to current time repeatedly until it is healthy (so relative comparisons against current millis are accurate)
       magIsHealthy = false;
+      fusion->setMagCalibrationHealthy(false);
     }
     return false; 
   }
