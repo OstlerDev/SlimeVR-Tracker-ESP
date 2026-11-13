@@ -144,6 +144,9 @@ struct MagCalParams {
   float GoodSoftCalMajorMaximum = 3;
   float GoodSoftCalMajorMultiplier = 2;
   float GoodSoftCalDiagMultiplier = 5;
+  /* The alternate threshold for determining soft-calibration health using ellipsoid health. Used in case the softcal thresholds fail */
+  /* but we still want to trust the ellipsoid to get rid of deviations */
+  float GoodSoftCalTrustThreshold = 0.7f;
 
   /* Throttle running heavy calculations for determining the best calibration for our set of points to this duration */
   /* This helps prevent lag when many new points are coming in */
@@ -527,6 +530,7 @@ private:
     float internalScore = deviationScore;
     if (
       !isGoodSoftCal(Candidate.M_Ainv) 
+      && candidateHealth.getHealth() < params.GoodSoftCalTrustThreshold // consider moving to isGoodSoftCal
     ) { internalScore = 1; }
     float deviationNorm = params.DeviationScorePenalty * (internalScore-1.0f);
     return spreadScore / (1.0f+(deviationNorm*deviationNorm));
