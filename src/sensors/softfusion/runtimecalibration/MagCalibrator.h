@@ -108,7 +108,7 @@ struct MagCalParams {
   /* How much should we penalize deviation from the ellipsoid skin when creating a weighted trust score for an incoming point */
   float DeviationScorePenalty = 1.0f / 0.1f; // a deviation of 0.1 will halve the spread score as a penalty
   /* The max deviation allowed before points are required to be thrown out to prevent bad calibrations */
-  float MaxDeviationNewPoints = 0.3;
+  float NewPointsMaxDeviation = 0.3;
   /* How much deviation is allowed in our point cloud from the ellipsoid before we should force remove it */
   float ForceRemoveDeviation = 0.15;
   /* The minimum distance allowed when force removing the most deviated point during worst sample selection */
@@ -117,6 +117,7 @@ struct MagCalParams {
   float ForceRemoveDistanceMultiplier = 5;
   /* How many times should we try to find a better point when forcing a point to be removed before attempting to */
   /* clean the bad point cloud by wiping a portion of the point cloud and wipe the bad point */
+  /* This often happens when the mag is disturbed by a nearby magnet like a controller or other trackers strap */
   int ForceRemoveMaxRetries = 100;
 
   /* The minimum amount of health that is required for a candidate to be promoted. Lower values encourages more frequent */
@@ -623,7 +624,7 @@ private:
       emitNewBest();
       // Wipe out part of the point cloud to force reconvergence of calibration
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
-        if (i % params.CleaningInterval != 0) continue; // clear out every X datapoint
+        if (i % params.CleaningInterval != 0) continue;
         float oldSample[3] = {x_vec[i], y_vec[i], z_vec[i]};
         x_vec[i] = 0;
         y_vec[i] = 0;
@@ -751,11 +752,9 @@ private:
     // make sure there is either a good soft calibration **OR** that the calibration is healthy
     if (
       getErrorAmt(score) > params.NewPointsMaxDeviation
-      && (isGoodSoftCal(Candidate.M_Ainv) /* || candidateHealth.getHealth() > params.NewPointsHealthyThreshold*/)
+      && (isGoodSoftCal(Candidate.M_Ainv))
       && pointTrustScore[worstSample] > 0.0f
     ) { return; }
-    // hard reject new extreme deviations
-    // if (getErrorAmt(score) > params.NewPointsExtremeDeviation) { return; }
     // don't accept bad samples in the first place.
     if (minDistance > averageDistance * params.ForceRemoveDistanceMultiplier && minDistance > params.ForceRemoveMinDistance) { return; }
     // if we are force replacing a point, make sure we are accepting a less deviated sample into the array instead of a worse sample
