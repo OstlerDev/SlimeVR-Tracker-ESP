@@ -756,7 +756,7 @@ private:
     // hard reject new extreme deviations
     // if (getErrorAmt(score) > params.NewPointsExtremeDeviation) { return; }
     // don't accept bad samples in the first place.
-    if (minDistance > averageDistance * params.ForceRemoveDistanceMultiplier) { return; }
+    if (minDistance > averageDistance * params.ForceRemoveDistanceMultiplier && minDistance > params.ForceRemoveMinDistance) { return; }
     // if we are force replacing a point, make sure we are accepting a less deviated sample into the array instead of a worse sample
     if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > params.ForceRemoveDeviation && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal(Candidate.M_Ainv)) { return; }
 
