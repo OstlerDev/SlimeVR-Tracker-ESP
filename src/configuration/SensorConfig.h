@@ -102,6 +102,8 @@ struct RuntimeCalibrationSensorConfig {
 	float M_Bias[3];
 	float M_Ainv[3][3];
 	float M_hm;
+	float VQF_magRefNorm;
+	float VQF_magRefDip;
 };
 
 struct MPU6050SensorConfig {

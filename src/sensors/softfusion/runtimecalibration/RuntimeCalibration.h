@@ -96,6 +96,7 @@ public:
 		magCalibrator.setMBias(activeCalibration.M_Bias);
 		magCalibrator.setMAinv(activeCalibration.M_Ainv);
 		magCalibrator.setHM(activeCalibration.M_hm);
+		fusion.getVQF()->setMagRef(activeCalibration.VQF_magRefNorm, activeCalibration.VQF_magRefDip);
 
 		currentStep = &nullCalibrationStep;
 	}
@@ -187,6 +188,7 @@ public:
 	float getGyroTimestep() final { return activeCalibration.G_Ts; }
 
 	uint64_t lastMagCalUpdate = 0;
+	uint64_t lastVQFCalUpdate = 0;
 	void scaleMagSample(float* magSample){ 
 		magCalibrator.scaleMagSample(magSample);
 		if (millis() - lastMagCalUpdate > 5000) {
@@ -208,6 +210,30 @@ public:
 			calibration.M_hm = magCalibrator.Best_hm;
 			saveCalibration();
 			printCalibration(CalibrationPrintFlags::MAG_CAL);
+		}
+		float magRef = fusion.getVQF()->getMagRefNorm();
+		float magDip = fusion.getVQF()->getMagRefDip();
+		if (
+			magCalibrator.vqfReady() 
+			&& !fusion.getVQF()->getMagDistDetected() 
+			&& millis() - lastVQFCalUpdate > 15 * 1000
+			&& calibration.VQF_magRefNorm != magRef
+			&& calibration.VQF_magRefDip != magDip
+		) {
+			float prevMagRefNorm = calibration.VQF_magRefNorm;
+			float prevMagRefDip = calibration.VQF_magRefDip;
+			calibration.VQF_magRefNorm = magRef;
+			calibration.VQF_magRefDip = magDip;
+			/* require a shift to norm or dip to save (prevents frequent saving) */
+			if (
+				prevMagRefNorm - magRef < 2 || prevMagRefNorm - magRef > 2
+				|| prevMagRefDip - magDip < 0.1 || prevMagRefDip - magDip > 0.1
+				|| millis() - lastVQFCalUpdate > 120 * 1000
+			) {
+				saveCalibration();
+				printCalibration(CalibrationPrintFlags::MAG_CAL);
+			}
+			lastVQFCalUpdate = millis();
 		}
 	}
 
@@ -454,6 +480,11 @@ private:
 					);
 				}
 				logger.info("]");
+				if (calibration.VQF_magRefNorm == 0.0 && calibration.VQF_magRefDip == 0.0) {
+					logger.info("Mag has not yet calibrated a Mag Field Reference.");
+				} else {
+					logger.info("Calibrated Mag Reference: (Norm: %f, Dip: %f)", calibration.VQF_magRefNorm, calibration.VQF_magRefDip);
+				}
 			}
 		}
 	}
@@ -508,7 +539,9 @@ private:
 
 		.M_Bias = {0.0, 0.0, 0.0},
 		.M_Ainv = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}},
-		.M_hm = 100
+		.M_hm = 100,
+		.VQF_magRefNorm = 0.0,
+		.VQF_magRefDip = 0.0
 	};
 
 	float activeZROChange = 0;
