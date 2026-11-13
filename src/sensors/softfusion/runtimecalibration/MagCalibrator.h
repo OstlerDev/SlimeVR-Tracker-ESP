@@ -128,6 +128,11 @@ struct MagCalParams {
   float CandidateImprovementMinimum = 0.05f;
   /* After promoting a candidate calibration what should we reset the candidate health to? */
   float CandidateHealthAfterPromotion = 0.0f;
+  /* How much should the current candidate health be penalized after a new ellipsoid is found. This prevents new ellipsoids from being */
+  /* accepted while they are still young. */
+  float CandidateNewEllipsoidHealthPenalty = -0.2f;
+  /* The minimum that the candidate health can go when applying the new ellipsoid health penalty */
+  float CandidateNewEllipsoidHealthMin = -0.3f;
   /* The frequency that points will be removed after candidate promotion. This clears out the array to force reconvergence, allowing */
   /* a chance for possible bad datapoints to be removed. */
   int CleaningInterval = 2; 
@@ -825,6 +830,15 @@ private:
       Candidate.M_Ainv[1][i] = M_BAinv[2][i];
       Candidate.M_Ainv[2][i] = M_BAinv[3][i];
     }
+
+    // lower trust score now that we calibrated a new ellipsoid
+    // This will cause the trust score to go negative if frequent ellipsoid generation is occuring, this is intentional./
+    candidateHealth.setHealth(
+      std::max(
+        params.CandidateNewEllipsoidHealthMin, 
+        candidateHealth.getHealth() + params.CandidateNewEllipsoidHealthPenalty
+      )
+    );
 
     emitNewCandidate();
     logger.debug("Candidate Ellipoid calibrated! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
