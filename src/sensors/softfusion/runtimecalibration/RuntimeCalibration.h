@@ -189,7 +189,14 @@ public:
 
 	uint64_t lastMagCalUpdate = 0;
 	uint64_t lastVQFCalUpdate = 0;
+	bool magExists = false;
 	void scaleMagSample(float* magSample){ 
+		if (!magExists) {
+			magExists = true;
+			printCalibration(CalibrationPrintFlags::MAG_CAL);
+		}
+
+		// scale the sample and calculate runtime calibration 
 		magCalibrator.scaleMagSample(magSample);
 		if (millis() - lastMagCalUpdate > 5000) {
 			lastMagCalUpdate = millis();
@@ -459,8 +466,9 @@ private:
 			}
 		}
 
-		if (any(toPrint & CalibrationPrintFlags::MAG_CAL)) {
-			if (calibration.M_Bias[0] == 0 && calibration.M_Bias[1] == 0 && calibration.M_Bias[2] == 0) {
+		// only print if the mag is known to exist
+		if (any(toPrint & CalibrationPrintFlags::MAG_CAL) && magExists) {
+			if (calibration.M_Bias[0] == 0.0 && calibration.M_Bias[1] == 0.0 && calibration.M_Bias[2] == 0.0) {
 				logger.info("Mag not calibrated yet, will calibrate automatically during use");
 			} else {
 				logger.info(

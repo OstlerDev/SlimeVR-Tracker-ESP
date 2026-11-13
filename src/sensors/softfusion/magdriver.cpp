@@ -125,7 +125,7 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 		interface.setDeviceId(mag.deviceId);
 		interface.setDummyBytes(mag.dummyBytes);
 
-		logger.info("Trying mag: %s", mag.name);
+		logger.debug("Trying mag: %s", mag.name);
 
 		uint8_t whoAmI = interface.readByte(mag.whoAmIReg);
 		if (whoAmI != mag.expectedWhoAmI) {
@@ -137,7 +137,7 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 			return false;
 		}
 
-		logger.info("Found mag %s! Initializing...", mag.name);
+		logger.debug("Found mag %s! Initializing...", mag.name);
 
 		if (!mag.setup(interface)) {
 			logger.error("Mag %s failed to initialize!", mag.name);
@@ -151,7 +151,7 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 	}
 
 	if (!detectedMag.has_value()) {
-		logger.info("No mag detected.");
+		logger.debug("No mag detected.");
 	}
 
 	this->interface = interface;
@@ -159,21 +159,13 @@ bool MagDriver::init(MagInterface&& interface, bool supports9ByteMags) {
 }
 
 void MagDriver::startPolling() const {
-	if (!detectedMag) {
-		return;
-	}
-
+	if (!detectedMag) { return; }
 	interface.startPolling(detectedMag->dataReg, detectedMag->dataWidth);
-	logger.info("Started Mag Polling!");
 }
 
 void MagDriver::stopPolling() const {
-	if (!detectedMag) {
-		return;
-	}
-
+	if (!detectedMag) { return; }
 	interface.stopPolling();
-	logger.info("Stopped Mag Polling!");
 }
 
 int log = 0;

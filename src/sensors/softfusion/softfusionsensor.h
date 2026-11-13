@@ -152,7 +152,7 @@ class SoftFusionSensor : public Sensor {
 
 	void processMagSample(const uint8_t* sample, const sensor_real_t timeDelta) {
 		float scaledSample[3];
-		magDriver.scaleMagSample(sample, scaledSample);
+		magDriver.scaleMagSample(sample, scaledSample); // scale to μT
 		calibrator.scaleMagSample(scaledSample);
 
 		m_fusion.updateMag(scaledSample, timeDelta);
@@ -258,8 +258,9 @@ public:
 				},
 				[&](int16_t sample, float TempTs) {
 					processTempSample(sample, TempTs);
+				[&](uint8_t* sample, float MagTs) { 
+					processMagSample(sample, MagTs); 
 				},
-				[&](uint8_t* sample, float MagTs) { processMagSample(sample, MagTs); },
 			});
 			if (overwhelmed) {
 				calibrator.signalOverwhelmed();
@@ -286,7 +287,8 @@ public:
 
 	sensor_real_t qwxyz[4]{1.0f, 0.0f, 0.0f, 0.0f};
 	Quat getQuaternionQuat() {
-		if (calibrator.magHealthy()) {
+		// use 9D fusion if the mag is toggled on in our device configuration and we have a mag attached.
+		if (magDriver.isMagAttached() && toggles.getToggle(SensorToggles::MagEnabled)) {
 			m_fusion.getQuat9D(qwxyz);
 		} else {
 			m_fusion.getQuat6D(qwxyz);
@@ -369,18 +371,40 @@ public:
 				Consts::Supports9ByteMag
 			);
 
-			if (toggles.getToggle(SensorToggles::MagEnabled)) {
+			// **for now**, always enable polling and never disable it... See comment below.
+			// if (toggles.getToggle(SensorToggles::MagEnabled)) {
 				magDriver.startPolling();
-			}
+			// }
 		}
 
 		toggles.onToggleChange([&](SensorToggles toggle, bool value) {
 			if (toggle == SensorToggles::MagEnabled) {
-				if (value) {
-					magDriver.startPolling();
-				} else {
-					magDriver.stopPolling();
-				}
+				// consider updating the VQF magDeltaOffset when mag is re-enabled to prevent 
+				// "snapping" to new heading when the toggle is re-enabled.
+
+				/*
+				 * @TODO
+				 * Decide if we should still be collecting the mag calibration in the background
+				 * even if mag is toggled off in the device settings. There is a tradeoff that
+				 * users might be trying to disable the calibration function if they disable the
+				 * mag, OR they might have disabled it because it wasn't working properly. If we
+				 * continue to create the calibration then if they attempt to turn back on the mag
+				 * in the future then we would be ready to immediately start utilizing it in a much
+				 * better way, and we might be able to solve the issue with their calibration while
+				 * it is "disabled".
+				 */
+				// For now I think its best if we still collect data from the mag even if it is disabled...
+				// Revisit this decision should lag or stability become a problem.
+// 				if (value) {
+// 					magDriver.startPolling();
+// 				} else {
+// 					magDriver.stopPolling();
+// #if ENABLE_INSPECTION 
+// 					rawMag[0] = 0.0f;
+// 					rawMag[1] = 0.0f;
+// 					rawMag[2] = 0.0f;
+// #endif
+// 				}
 			}
 		});
 	}
