@@ -634,7 +634,7 @@ private:
       }
 
       // Reset candidate health to make the new candidate prove it's healthy over a new time period.
-      candidateHealth.setHealth(0.0f);
+      candidateHealth.setHealth(params.CandidateHealthAfterPromotion);
     }
 
     // Debug with VQF State.
