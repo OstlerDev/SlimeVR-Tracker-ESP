@@ -37,7 +37,7 @@
 
 
 /* How many points should we collect to try and find the calibration */
-#define SAMPLES_TOTAL (32)
+#define SAMPLES_TOTAL (64)
 
 namespace SlimeVR::Sensors::RuntimeCalibration {
 
@@ -102,7 +102,7 @@ struct MagCalParams {
   int LogDumpFrequency = 30 * 1000;
 
   /* How frequently should we test incoming samples to determine if we should add them to our point cloud */
-  int SampleFrequency = 10;
+  int SampleFrequency = 5;
   /* The miniumum distance allowed when collecting new points to fill empty slots in our point cloud */
   float MinDistanceFreshPoints = 5;
   /* How much should we penalize deviation from the ellipsoid skin when creating a weighted trust score for an incoming point */
@@ -135,7 +135,7 @@ struct MagCalParams {
   float CandidateNewEllipsoidHealthMin = -0.3f;
   /* The frequency that points will be removed after candidate promotion. This clears out the array to force reconvergence, allowing */
   /* a chance for possible bad datapoints to be removed. */
-  int CleaningInterval = 2; 
+  int CleaningInterval = 4; 
 
   /* Soft Calibration Requirements to be deemed healthy. Stops unhealthy ellipsoids from "locking in" too early. */
   /* Once a soft calibration is determined to be healthy we start restricting new point deviation from surface. */
