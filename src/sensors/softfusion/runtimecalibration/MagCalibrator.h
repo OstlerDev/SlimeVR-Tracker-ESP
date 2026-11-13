@@ -736,6 +736,7 @@ private:
       y_vec[worstSample] = 0;
       z_vec[worstSample] = 0;
       pointTrustScore[worstSample] = 0;
+      return;
     }
 
     // test how well the new point fits the existing ellipsoid
@@ -797,6 +798,7 @@ private:
   int ellipsoidThrottleAttempts = 0;
   void runMagneto(bool forceCreate = false) {
     // throttle how frequently the magneto algorithm is run (points are still adjusted)
+    // defer until the next good point is found, don't schedule it.
     if (millis() - lastEllipsoidCreate <= params.ThrottleEllipsoidCalculation && !forceCreate) { 
       ellipsoidThrottleAttempts++;
       logger.debug("Throttling Ellipsoid creation! Throttled %d times during this period.", ellipsoidThrottleAttempts);
@@ -808,6 +810,7 @@ private:
     // create a new calibration
     MagnetoCalibration* magneto = new MagnetoCalibration();
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
+      if (x_vec[i] == 0 && y_vec[i] == 0 && z_vec[i] == 0) continue; // skip empty samples
       magneto->sample(x_vec[i], y_vec[i], z_vec[i]);  
     }
     float M_BAinv[4][3];
