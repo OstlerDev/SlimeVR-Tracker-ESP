@@ -70,7 +70,7 @@ struct VQFParams {
 	 *
 	 * Default value: 9.0 s
 	 */
-	vqf_real_t tauMag = 9.0;
+	vqf_real_t tauMag = 15.0;
 
 #ifndef VQF_NO_MOTION_BIAS_ESTIMATION
 	/**
