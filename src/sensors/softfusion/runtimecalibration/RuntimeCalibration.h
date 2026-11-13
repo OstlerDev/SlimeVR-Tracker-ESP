@@ -32,6 +32,7 @@
 #include "AccelBiasCalibrationStep.h"
 #include "GyroBiasCalibrationStep.h"
 #include "MotionlessCalibrationStep.h"
+#include "MagCalibrator.h"
 #include "NullCalibrationStep.h"
 #include "SampleRateCalibrationStep.h"
 #include "configuration/SensorConfig.h"
@@ -198,23 +199,26 @@ public:
 
 		// scale the sample and calculate runtime calibration 
 		magCalibrator.scaleMagSample(magSample);
-		if (millis() - lastMagCalUpdate > 5000) {
-			lastMagCalUpdate = millis();
-			// only continue if it has changed
-			if (calibration.M_Bias[0] == magCalibrator.Best_M_Bias[0]
-				&& calibration.M_Bias[1] == magCalibrator.Best_M_Bias[1]
-				&& calibration.M_Bias[2] == magCalibrator.Best_M_Bias[2]
-			) { return; }
+		MagCalibration bestCalib = magCalibrator.getCalibration();
 
-			calibration.M_Bias[0] = magCalibrator.Best_M_Bias[0];
-			calibration.M_Bias[1] = magCalibrator.Best_M_Bias[1];
-			calibration.M_Bias[2] = magCalibrator.Best_M_Bias[2];
+		// Save calibration to disk
+		if (
+			magCalibrator.magHealthy() 
+			&& millis() - lastMagCalUpdate > 5 * 1000
+			&& calibration.M_Bias[0] != bestCalib.M_Bias[0]
+			&& calibration.M_Bias[1] != bestCalib.M_Bias[1]
+			&& calibration.M_Bias[2] != bestCalib.M_Bias[2]
+		) {
+			lastMagCalUpdate = millis();
+			calibration.M_Bias[0] = bestCalib.M_Bias[0];
+			calibration.M_Bias[1] = bestCalib.M_Bias[1];
+			calibration.M_Bias[2] = bestCalib.M_Bias[2];
 			for (int i = 0; i < 3; i++) {
-				calibration.M_Ainv[0][i] = magCalibrator.Best_M_Ainv[0][i];
-				calibration.M_Ainv[1][i] = magCalibrator.Best_M_Ainv[1][i];
-				calibration.M_Ainv[2][i] = magCalibrator.Best_M_Ainv[2][i];
+				calibration.M_Ainv[0][i] = bestCalib.M_Ainv[0][i];
+				calibration.M_Ainv[1][i] = bestCalib.M_Ainv[1][i];
+				calibration.M_Ainv[2][i] = bestCalib.M_Ainv[2][i];
 			}
-			calibration.M_hm = magCalibrator.Best_hm;
+			calibration.M_hm = bestCalib.hm;
 			saveCalibration();
 			printCalibration(CalibrationPrintFlags::MAG_CAL);
 		}

@@ -70,6 +70,15 @@ private:
   }
 };
 
+struct MagCalibration {
+  float M_Bias[3] = {0.0f, 0.0f, 0.0f};
+  float M_Ainv[3][3] = {
+    {1.0f,0.0f,0.0f},
+    {0.0f,1.0f,0.0f},
+    {0.0f,0.0f,1.0f}
+  };
+  double hm = 100;
+};
 struct MagCalParams {
   /* The initial health for the Best calibration, higher values speed up the "warmup" of saved calibrations */
   float StartHealth = 0.6f;
@@ -135,14 +144,6 @@ public:
     activeHealth.setHealth(params.StartHealth);
   }
 
-  // public because returning them is annoying until we move this to a struct...
-  float Best_M_Bias[3] = {0.0f, 0.0f, 0.0f};
-  float Best_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
-  double Best_hm = 100;
-  float Candidate_M_Bias[3] = {0.0f, 0.0f, 0.0f};
-  float Candidate_M_Ainv[3][3] = {{1.0f,0.0f,0.0f},{0.0f,1.0f,0.0f},{0.0f,0.0f,1.0f}};
-  double Candidate_hm = 100;
-
   void scaleMagSample(float* sample) {
     if (sample[0] == 0 && sample[1] == 0 && sample[2] == 0) { return; }
     sampleNumber++;
@@ -155,7 +156,7 @@ public:
     lastSample[2] = sample[2];
 
     float score = 0.0f;
-    scaleAndScore(sample, &score, Best_M_Bias, Best_M_Ainv, Best_hm);
+    scaleAndScore(sample, &score, Best.M_Bias, Best.M_Ainv, Best.hm);
 
     // only adjust health when movement is detected (don't improve health for sitting still)
     // consider requiring health to span a percentage of the sphere to calculate full 3d excitation.
@@ -164,7 +165,7 @@ public:
 
       float candidateScore = 0.0f;
       float candidateSample[3] = {lastSample[0], lastSample[1], lastSample[2]};
-      scaleAndScore(candidateSample, &candidateScore, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
+      scaleAndScore(candidateSample, &candidateScore, Candidate.M_Bias, Candidate.M_Ainv, Candidate.hm);
       candidateHealth.addSample(candidateScore);
     }
   }
@@ -193,20 +194,26 @@ public:
   }
   bool vqfReady() { return vqfHasBeenHealthy; }
 
+  void setCalibration(MagCalibration newCalib) { 
+    Best = newCalib;
+    emitNewBest();
+  }
+  MagCalibration getCalibration() { return Best; }
+
   void setMBias(float M_Bias[3]) {
-    Best_M_Bias[0] = M_Bias[0];
-    Best_M_Bias[1] = M_Bias[1];
-    Best_M_Bias[2] = M_Bias[2];
+    Best.M_Bias[0] = M_Bias[0];
+    Best.M_Bias[1] = M_Bias[1];
+    Best.M_Bias[2] = M_Bias[2];
   }
   void setMAinv(float M_A_inv[3][3]) {
     for (int i = 0; i < 3; i++) {
-      Best_M_Ainv[0][i] = M_A_inv[0][i];
-      Best_M_Ainv[1][i] = M_A_inv[1][i];
-      Best_M_Ainv[2][i] = M_A_inv[2][i];
+      Best.M_Ainv[0][i] = M_A_inv[0][i];
+      Best.M_Ainv[1][i] = M_A_inv[1][i];
+      Best.M_Ainv[2][i] = M_A_inv[2][i];
     }
   }
   void setHM(float M_hm) {
-    Best_hm = M_hm;
+    Best.hm = M_hm;
   }
 
   // debug helpers
@@ -229,6 +236,9 @@ private:
   Logging::Logger logger{"MagCalibrator"};
   VQF* fusion; // reference to vqf for direct access
   MagCalParams params;
+
+  MagCalibration Best;
+  MagCalibration Candidate;
 
   // run background updates required.
   void tick() {
@@ -277,29 +287,29 @@ private:
       logger.debug("Active calibration health: %0.3f (magIsHealthy %d, magHealthyTime: %0.2f), Candidate calibration health: %0.3f", activeHealth.getHealth(), magIsHealthy, (millis() - magHealthySince) / 1000.0f, candidateHealth.getHealth());
       
       // log current best
-      logger.debug("Best Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Best_M_Bias[0], Best_M_Bias[1], Best_M_Bias[2], Best_hm, getTotalSpread(), getErrorTotal(), improvementSamples);
-      logger.debug("Best Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Best_M_Ainv));
+      logger.debug("Best Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Best.M_Bias[0], Best.M_Bias[1], Best.M_Bias[2], Best.hm, getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Best Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Best.M_Ainv));
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
           "  [%f, %f, %f],",
-          Best_M_Ainv[0][i],
-          Best_M_Ainv[1][i],
-          Best_M_Ainv[2][i]
+          Best.M_Ainv[0][i],
+          Best.M_Ainv[1][i],
+          Best.M_Ainv[2][i]
         );
       }
       logger.debug("}");
 
       // log current candidate
-      logger.debug("Candidate Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Candidate_M_Bias[0], Candidate_M_Bias[1], Candidate_M_Bias[2], Candidate_hm, getTotalSpread(), getErrorTotal(), improvementSamples);
-      logger.debug("Candidate Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Candidate_M_Ainv));
+      logger.debug("Candidate Magneto1.4 calibration: (%0.2f, %0.2f, %0.2f, hm: %0.2f, spread: %0.1f, total error: %0.3f, improvement samples: %d)", Candidate.M_Bias[0], Candidate.M_Bias[1], Candidate.M_Bias[2], Candidate.hm, getTotalSpread(), getErrorTotal(), improvementSamples);
+      logger.debug("Candidate Magneto1.4 calibration matrix: (isGoodSoftCal: %d)", isGoodSoftCal(Candidate.M_Ainv));
       logger.debug("{");
       for (int i = 0; i < 3; i++) {
         logger.debug(
           "  [%f, %f, %f],",
-          Candidate_M_Ainv[0][i],
-          Candidate_M_Ainv[1][i],
-          Candidate_M_Ainv[2][i]
+          Candidate.M_Ainv[0][i],
+          Candidate.M_Ainv[1][i],
+          Candidate.M_Ainv[2][i]
         );
       }
       logger.debug("}");
@@ -367,32 +377,8 @@ private:
       z_vec[i] = 0;
       pointTrustScore[i] = 0;
     }
-
-    Best_hm = 100;
-    Best_M_Bias[0] = 0.0f;
-    Best_M_Bias[1] = 0.0f;
-    Best_M_Bias[2] = 0.0f;
-    for (int i = 0; i < 3; i++) {
-      Best_M_Ainv[0][i] = 0.0f;
-      Best_M_Ainv[1][i] = 0.0f;
-      Best_M_Ainv[2][i] = 0.0f;
-    }
-    Best_M_Ainv[0][0] = 1.0f;
-    Best_M_Ainv[1][1] = 1.0f;
-    Best_M_Ainv[2][2] = 1.0f;
-
-    Candidate_hm = 100;
-    Candidate_M_Bias[0] = 0.0f;
-    Candidate_M_Bias[1] = 0.0f;
-    Candidate_M_Bias[2] = 0.0f;
-    for (int i = 0; i < 3; i++) {
-      Candidate_M_Ainv[0][i] = 0.0f;
-      Candidate_M_Ainv[1][i] = 0.0f;
-      Candidate_M_Ainv[2][i] = 0.0f;
-    }
-    Candidate_M_Ainv[0][0] = 1.0f;
-    Candidate_M_Ainv[1][1] = 1.0f;
-    Candidate_M_Ainv[2][2] = 1.0f;
+    Best = {};
+    Candidate = {};
   }
   int getFirstEmpty(){
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
@@ -448,7 +434,7 @@ private:
       return bestDistIndex;
     }
     // if there are no isolated samples, next reject samples that deviate from ellipsoid skin.
-    if (getErrorAmt(worstErrorScore) > params.ForceRemoveDeviation && isGoodSoftCal(Candidate_M_Ainv)) {
+    if (getErrorAmt(worstErrorScore) > params.ForceRemoveDeviation && isGoodSoftCal(Candidate.M_Ainv)) {
       logger.debug("Force replacing deviated score: %0.4f, index: %d", worstErrorScore, worstErrorSample);
       // Set the weighted trust score to zero to force replacement of this sample.
       pointTrustScore[worstErrorSample] = 0;
@@ -489,7 +475,7 @@ private:
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
       float sample[3] = {x_vec[i], y_vec[i], z_vec[i]};
       float score = 0.0f;
-      scaleAndScore(sample, &score, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
+      scaleAndScore(sample, &score, Candidate.M_Bias, Candidate.M_Ainv, Candidate.hm);
       pointDeviation[i] = score;
       pointTrustScore[i] = calculateTrust(minDist_vec[i], score);
     }
@@ -514,7 +500,9 @@ private:
   // Returns an overall calculated trust score. 
   float calculateTrust(float spreadScore, float deviationScore) {
     float internalScore = deviationScore;
-    if (!isGoodSoftCal(Candidate_M_Ainv)) { internalScore = 1; }
+    if (
+      !isGoodSoftCal(Candidate.M_Ainv) 
+    ) { internalScore = 1; }
     float deviationNorm = params.DeviationScorePenalty * (internalScore-1.0f);
     return spreadScore / (1.0f+(deviationNorm*deviationNorm));
   }
@@ -563,19 +551,19 @@ private:
     // If we have not initialized the best calibration then return false
     if (!hasBestCalibration()) return false;
     // check if they are an exact match or not
-    if (Candidate_M_Bias[0] != Best_M_Bias[0]) return false;
-    if (Candidate_M_Bias[1] != Best_M_Bias[1]) return false;
-    if (Candidate_M_Bias[2] != Best_M_Bias[2]) return false;
+    if (Candidate.M_Bias[0] != Best.M_Bias[0]) return false;
+    if (Candidate.M_Bias[1] != Best.M_Bias[1]) return false;
+    if (Candidate.M_Bias[2] != Best.M_Bias[2]) return false;
     for (int i = 0; i < 3; i++) {
-      if (Candidate_M_Ainv[i][0] != Best_M_Ainv[i][0]) return false;
-      if (Candidate_M_Ainv[i][1] != Best_M_Ainv[i][1]) return false;
-      if (Candidate_M_Ainv[i][2] != Best_M_Ainv[i][2]) return false;
+      if (Candidate.M_Ainv[i][0] != Best.M_Ainv[i][0]) return false;
+      if (Candidate.M_Ainv[i][1] != Best.M_Ainv[i][1]) return false;
+      if (Candidate.M_Ainv[i][2] != Best.M_Ainv[i][2]) return false;
     }
-    if (Candidate_hm != Best_hm) return false;
+    if (Candidate.hm != Best.hm) return false;
     return true;
   }
   bool hasBestCalibration() {
-    if (Best_M_Bias[0] == 0 && Best_M_Bias[1] == 0 && Best_M_Bias[2] == 0) return false;
+    if (Best.M_Bias[0] == 0 && Best.M_Bias[1] == 0 && Best.M_Bias[2] == 0) return false;
     return true;
   }
 
@@ -600,7 +588,7 @@ private:
     // If we have a best calibration, and that best calibration has a good soft calibration, don't get rid of it in favor of a soft
     // calibration that is not a good soft calibration. Don't toss out good for bad.
     bool betterSoftCal = true;
-    if (hasBestCalibration() && isGoodSoftCal(Best_M_Ainv) && !isGoodSoftCal(Candidate_M_Ainv)) { betterSoftCal = false; }
+    if (hasBestCalibration() && isGoodSoftCal(Best.M_Ainv) && !isGoodSoftCal(Candidate.M_Ainv)) { betterSoftCal = false; }
     // Check if the current candidate ellipsoid is the best one we have right now
     // We do this before accepting a new point and calculating a new ellipsoid
     // This means early on we will get lots of calibrations accepted then it becomes harder
@@ -612,26 +600,7 @@ private:
       && betterSoftCal
     ) {
       logger.debug("Promoting Candidate Ellipsoid to Best Ellipsoid! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
-      Best_M_Bias[0] = Candidate_M_Bias[0];
-      Best_M_Bias[1] = Candidate_M_Bias[1];
-      Best_M_Bias[2] = Candidate_M_Bias[2];
-      Candidate_M_Bias[0] = 0.0f;
-      Candidate_M_Bias[1] = 0.0f;
-      Candidate_M_Bias[2] = 0.0f;
-      for (int i = 0; i < 3; i++) {
-        Best_M_Ainv[0][i] = Candidate_M_Ainv[0][i];
-        Best_M_Ainv[1][i] = Candidate_M_Ainv[1][i];
-        Best_M_Ainv[2][i] = Candidate_M_Ainv[2][i];
-        Candidate_M_Ainv[0][i] = 0.0f;
-        Candidate_M_Ainv[1][i] = 0.0f;
-        Candidate_M_Ainv[2][i] = 0.0f;
-      }
-      Candidate_M_Ainv[0][0] = 1.0f;
-      Candidate_M_Ainv[1][1] = 1.0f;
-      Candidate_M_Ainv[2][2] = 1.0f;
-      Best_hm = Candidate_hm;
-      Candidate_hm = 100;
-
+      Best = Candidate;
       // Wipe out part of the point cloud to force reconvergence of calibration
       for (int i = 0; i < SAMPLES_TOTAL; i++) {
         if (i % params.CleaningInterval != 0) continue; // clear out every X datapoint
@@ -744,17 +713,24 @@ private:
     // test how well the new point fits the existing ellipsoid
     float score = 0.0f;
     float testSample[3] = {sample[0], sample[1], sample[2]};
-    scaleAndScore(&testSample[0], &score, Candidate_M_Bias, Candidate_M_Ainv, Candidate_hm);
+    scaleAndScore(&testSample[0], &score, Candidate.M_Bias, Candidate.M_Ainv, Candidate.hm);
 
     float weightedTrustScore = calculateTrust(minDistance, score);
     if (sampleNumber % 10000 == 0 || pointTrustScore[worstSample] <= 0.0f) logger.debug("[%d] Weighted Trust: %0.4f, Deviation Score: %0.4f, Raw Distance: %0.2f | Worst index: %d, worst trust: %0.4f, worst dist: %0.2f, worst score: %0.4f | New Point: (%0.2f, %0.2f, %0.2f)", sampleNumber, weightedTrustScore, score, minDistance, worstSample, pointTrustScore[worstSample], minDist_vec[worstSample], pointDeviation[worstSample], sample[0], sample[1], sample[2]);
 
     // hard ignore points that deviate from the **best** ellipsoid skin **UNLESS** we are force replacing a bad point
-    if (getErrorAmt(score) > params.MaxDeviationNewPoints && isGoodSoftCal(Candidate_M_Ainv) && pointTrustScore[worstSample] > 0.0f) { return; }
+    // make sure there is either a good soft calibration **OR** that the calibration is healthy
+    if (
+      getErrorAmt(score) > params.NewPointsMaxDeviation
+      && (isGoodSoftCal(Candidate.M_Ainv) /* || candidateHealth.getHealth() > params.NewPointsHealthyThreshold*/)
+      && pointTrustScore[worstSample] > 0.0f
+    ) { return; }
+    // hard reject new extreme deviations
+    // if (getErrorAmt(score) > params.NewPointsExtremeDeviation) { return; }
     // don't accept bad samples in the first place.
     if (minDistance > averageDistance * params.ForceRemoveDistanceMultiplier) { return; }
     // if we are force replacing a point, make sure we are accepting a less deviated sample into the array instead of a worse sample
-    if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > params.ForceRemoveDeviation && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal(Candidate_M_Ainv)) { return; }
+    if (pointTrustScore[worstSample] <= 0.0f && (getErrorAmt(score) > params.ForceRemoveDeviation && getErrorAmt(score) > getErrorAmt(pointDeviation[worstSample])) && isGoodSoftCal(Candidate.M_Ainv)) { return; }
 
     // See if it is a better point than an existing one
     if ((weightedTrustScore > pointTrustScore[worstSample] || pointTrustScore[worstSample] <= 0.0f)) {
@@ -807,17 +783,17 @@ private:
       magneto->sample(x_vec[i], y_vec[i], z_vec[i]);  
     }
     float M_BAinv[4][3];
-    magneto->current_calibration(M_BAinv, &Candidate_hm);
+    magneto->current_calibration(M_BAinv, &Candidate.hm);
     delete magneto;
 
-    Candidate_M_Bias[0] = M_BAinv[0][0];
-    Candidate_M_Bias[1] = M_BAinv[0][1];
-    Candidate_M_Bias[2] = M_BAinv[0][2];
+    Candidate.M_Bias[0] = M_BAinv[0][0];
+    Candidate.M_Bias[1] = M_BAinv[0][1];
+    Candidate.M_Bias[2] = M_BAinv[0][2];
 
     for (int i = 0; i < 3; i++){
-      Candidate_M_Ainv[0][i] = M_BAinv[1][i];
-      Candidate_M_Ainv[1][i] = M_BAinv[2][i];
-      Candidate_M_Ainv[2][i] = M_BAinv[3][i];
+      Candidate.M_Ainv[0][i] = M_BAinv[1][i];
+      Candidate.M_Ainv[1][i] = M_BAinv[2][i];
+      Candidate.M_Ainv[2][i] = M_BAinv[3][i];
     }
 
     logger.debug("Candidate Ellipoid calibrated! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
