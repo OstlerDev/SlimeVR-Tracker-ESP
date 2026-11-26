@@ -211,7 +211,7 @@ struct VQFParams {
 	 *
 	 * Default value: 0.05 s
 	 */
-	vqf_real_t magCurrentTau = 0.05;
+	vqf_real_t magCurrentTau = 0.2;
 	/**
 	 * @brief Time constant for the adjustment of the magnetic field reference (in
 	 * seconds).
@@ -221,7 +221,7 @@ struct VQFParams {
 	 *
 	 * Default value: 20.0 s
 	 */
-	vqf_real_t magRefTau = 20.0;
+	vqf_real_t magRefTau = 10.0;
 	/**
 	 * @brief Relative threshold for the magnetic field strength for magnetic
 	 * disturbance detection.
@@ -237,7 +237,7 @@ struct VQFParams {
 	 *
 	 * Default vaule: 10 °
 	 */
-	vqf_real_t magDipTh = 10.0;
+	vqf_real_t magDipTh = 5.0;
 	/**
 	 * @brief Duration after which to accept a different homogeneous magnetic field (in
 	 * seconds).
@@ -249,7 +249,7 @@ struct VQFParams {
 	 *
 	 * Default value: 20.0
 	 */
-	vqf_real_t magNewTime = 20.0;
+	vqf_real_t magNewTime = 15.0;
 	/**
 	 * @brief Duration after which to accept a homogeneous magnetic field for the first
 	 * time (in seconds).
@@ -269,7 +269,7 @@ struct VQFParams {
 	 *
 	 * Default value: 20.0 °/s
 	 */
-	vqf_real_t magNewMinGyr = 20.0;
+	vqf_real_t magNewMinGyr = 10.0;
 	/**
 	 * @brief Minimum duration within thresholds after which to regard the field as
 	 * undisturbed again (in seconds).

@@ -51,10 +51,20 @@ void createCalibration(void) {
   // std::ifstream file("test/2026-11-05_15-09-04_LEFT_LOWER_LEG_F024F9CCC0620_taekwondo.log");
 
   // std::ifstream file("test/2026-11-12_01-35-12_LEFT_LOWER_LEG_F024F9CCC0620.log"); // rotates when calibration becomes healthy
-  std::ifstream file("test/2026-11-12_01-35-12_LEFT_FOOT_F024F9CC31CF0.log");
+  // std::ifstream file("test/2026-11-12_01-35-12_LEFT_FOOT_F024F9CC31CF0.log");
+  // std::ifstream file("test/2026-11-14_01-30-00_RIGHT_LOWER_LEG_F024F9CC3BC40.log");
 
-  // std::ifstream file("test/2026-11-12_01-35-12_UPPER_CHEST_F024F9CC39DF0.log"); // rotates continuously for the start
+  std::ifstream file("test/2026-11-12_01-35-12_UPPER_CHEST_F024F9CC39DF0.log"); // rotates continuously for the start
 
+  // std::ifstream file("test/2026-11-21_22-54-09_HIP_F024F9CC2ECB0.log");
+  // std::ifstream file("test/2026-11-21_22-54-09_LEFT_FOOT_F024F9CC31CF0.log");
+  // std::ifstream file("test/2026-11-21_22-54-09_LEFT_LOWER_LEG_F024F9CCC0620.log");
+  // std::ifstream file("test/2026-11-21_22-54-09_RIGHT_LOWER_LEG_F024F9CC3BC40.log");
+  // std::ifstream file("test/2026-11-21_22-54-09_UPPER_CHEST_F024F9CC39DF0.log");
+
+  // std::ifstream file("test/2026-11-19_02-19-33_LEFT_FOOT_F024F9CC31CF0.log");
+  // std::ifstream file("test/2026-11-19_02-19-33_LEFT_LOWER_LEG_F024F9CCC0620.log");
+  // std::ifstream file("test/2026-11-19_02-19-33_LEFT_UPPER_LEG_F024F9CC5D570.log");
 
   std::FILE* outfile = std::fopen("test/visualize-calibration.log", "w");
   std::FILE* trackerQuats = std::fopen("test/sensor-quats-9d.log", "w");
@@ -75,7 +85,7 @@ void createCalibration(void) {
 
   float gyrTs = 1.0f/240;
   float accTs = 1.0f/120;
-  float magTs = 1.0f/120;
+  float magTs = 1.0f/100;
 
   float outputEveryMs = 10;
 
@@ -137,14 +147,17 @@ void createCalibration(void) {
   //   .hm = 88.522415
   // };
   // magCalibrator.setCalibration(calib);
-  // vqf.setMagRef(90.9888, 1.0658); //chest
-  // vqf.setMagRef(124.2942, 0.9881); //leg
-  // vqf.setMagRef(69.7079, 1.1251); //chest
+  // // vqf.setMagRef(90.9888, 1.0658); //chest
+  // // vqf.setMagRef(124.2942, 0.9881); //leg
+  // vqf.setMagRef(80.3402, 1.0); //chest
+
+  // vqf.setMagRef(44.0129, 0.9725); // real WMM ref
 
   int linesProcessed = 0;
   int magHealthyAt = 0;
   int vqfHealthyAt = 0;
 
+  bool lastStatus = false;
   int magHealthyFor = 0;
 
   float magCorrectionRate = 0.0f;
@@ -159,6 +172,10 @@ void createCalibration(void) {
   int sensorType = 0;
   float hmdTime = 0.0f;
   int64_t lastProcessed = 0;
+
+  int lastRest = -1;
+  int totalTimeRested = 0;
+  int timesRested = 0;
 
   // simulate time at 100hz
   while (std::getline(file,line)) {
@@ -179,6 +196,18 @@ void createCalibration(void) {
       vqf.updateAcc(xyz);
       vqf6D.updateAcc(xyz);
     }
+
+    if (vqf6D.getRestDetected()) {
+      if (lastRest == -1) {
+        lastRest = millisTimeSimulate;
+        timesRested+=1;
+      }
+    } else if (lastRest != -1) {
+      int restDuration = millisTimeSimulate-lastRest;
+      totalTimeRested += restDuration;
+      std::printf("[millis(): %d] Was at rest for: %0.1f seconds...\n", millisTimeSimulate, restDuration/1000.0f);
+      lastRest = -1;
+    }
     if (sensorType == 2) {
       magCalibrator.scaleMagSample(&xyz[0]);
       vqf.updateMag(xyz);
@@ -195,19 +224,20 @@ void createCalibration(void) {
       vqf6D.getQuat6D(qwxyz6D);
       std::fprintf(trackerQuats6D, "%lld,%f,%f,%f,%f\n", sensorTime, qwxyz6D[0], qwxyz6D[1], qwxyz6D[2], qwxyz6D[3]);
 
-      if (magHealthyAt == 0 && magCalibrator.magHealthy()) { magHealthyAt = millisTimeSimulate; }
+      if (magHealthyAt == 0 && magCalibrator.getMagStatus().active) { magHealthyAt = millisTimeSimulate; }
       if (vqfHealthyAt == 0 && magCalibrator.vqfReady()) { vqfHealthyAt = millisTimeSimulate; }
 
-      magCorrectionRate += std::fabs(vqf.getState().lastMagCorrAngularRate);
-      if (magCalibrator.magHealthy()) { 
-        magHealthyFor++;
+      // magCorrectionRate += std::fabs(vqf.getState().lastMagCorrAngularRate);
+      // if (magCalibrator.magHealthy()) { 
+      //   magHealthyFor++;
 
         totalMagCorrection += std::fabs(vqf.getState().lastMagCorrAngularRate);
-        if (linesProcessed % 10000 == 0) { 
-          std::printf("[%d] magCorrectionRate: %f\n", linesProcessed, magCorrectionRate);
-          magCorrectionRate = 0.0f;
-        }
-      }
+      //   if (linesProcessed % 10000 == 0) { 
+      //     std::printf("[%d] magCorrectionRate: %f\n", linesProcessed, magCorrectionRate);
+      //     magCorrectionRate = 0.0f;
+      //   }
+      // }
+
 
       // if (linesProcessed % 100000 == 0) { magCalibrator.logCalibration(); } 
 
@@ -217,13 +247,21 @@ void createCalibration(void) {
   float timePassed = millisTimeSimulate/(60.0f*60.0f*1000.0f);
   float timeMagHealthyAt = magHealthyAt/(60.0f*60.0f*1000.0f);
   float timeVQFHealthyAt = vqfHealthyAt/(60.0f*60.0f*1000.0f);
-  float timeMagHealthyFor = magHealthyFor/(60.0f*60.0f*100.0f);
+  float timeMagHealthyFor = magCalibrator.getTotalActiveDuration()/(60.0f*60.0f);
   float totalTimeHealthy = magCalibrator.getTotalHealthDuration()/(60.0f*60.0f);
   float totalTimeDisturbed = magCalibrator.getTotalDisturbedDuration()/(60.0f*60.0f);
   magCalibrator.logCalibration();
   std::printf("Processed %d samples (~%0.2fhrs) (vqf healthy at: ~%0.2fhrs, ~%0.2fhrs left) (total time vqf healthy: ~%0.2fhrs) (total time vqf disturbed: ~%0.2fhrs)\n", linesProcessed, timePassed, timeVQFHealthyAt, timePassed-timeVQFHealthyAt, totalTimeHealthy, totalTimeDisturbed);
   std::printf("Processed %d samples (~%0.2fhrs) (mag healthy at: ~%0.2fhrs, ~%0.2fhrs left) (total time mag healthy: ~%0.2fhrs) (total time mag unhealthy: ~%0.2fhrs)\n", linesProcessed, timePassed, timeMagHealthyAt, timePassed-timeMagHealthyAt, timeMagHealthyFor, (timePassed-timeMagHealthyAt)-timeMagHealthyFor);
   std::printf("Total mag correction for run: %0.2f\n", totalMagCorrection);
+
+  // if (lastRest != -1) {
+  //   int64_t restDuration = millisTimeSimulate-lastRest;
+  //   totalTimeRested += restDuration;
+  //   std::printf("Was at rest for: %0.1f seconds...\n", restDuration/1000.0f);
+  // }
+  // std::printf("Total times rested: %d, Total combined rest duration: %0.1f seconds (%0.1f min) (%0.1f percent of the time) \n", timesRested, totalTimeRested/1000.0f, totalTimeRested/(60.0f*1000.0f), ((totalTimeRested*1.0f)/(millisTimeSimulate*1.0f))*100.0f);
+  std::printf("Total session duration: %0.2f hours \n", timePassed);
 }
 
 int main() {
