@@ -79,6 +79,11 @@ struct MagCalibration {
   };
   double hm = 100;
 };
+struct MagStatus {
+  bool active = false;
+  float duration = 0.0f;
+  float recentCorrection = 0.0f;
+};
 struct MagSampleChange {
   float newSample[3];
   float oldSample[3];
@@ -151,6 +156,10 @@ struct MagCalParams {
   /* Throttle running heavy calculations for determining the best calibration for our set of points to this duration */
   /* This helps prevent lag when many new points are coming in */
   int ThrottleEllipsoidCalculation = 2 * 1000;
+
+  /* Used only to report the health of the magnetometer to the server */
+  /* The number of VQF yaw mag correction angles to sum together when reporting back the recent correction angle */
+  int MagStatusCorrectionSamples = 25;
 };
 
 class MagCalibrator {
@@ -158,6 +167,7 @@ public:
   MagCalibrator(VQF* vqf) : fusion(vqf) {
     resetCalibration(); // init
     activeHealth.setHealth(params.StartHealth);
+    magCorrectionMultiplier = 1.0f - (1.0f/params.MagStatusCorrectionSamples); // calculate once
   }
 
   void scaleMagSample(float* sample) {
@@ -209,6 +219,7 @@ public:
     return false; 
   }
   bool vqfReady() { return vqfHasBeenHealthy; }
+  MagStatus getMagStatus() { return status; }
 
   void setCalibration(MagCalibration newCalib) { 
     Best = newCalib;
@@ -258,7 +269,29 @@ private:
   // run background updates required.
   void tick() {
     magHealthy();
+    updateStatus();
     logStatus();
+  }
+
+  MagStatus status;
+  uint64_t statusLastChangeTS = 0;
+  float magCorrectionMultiplier = 0.0f;
+  float timeActive = 0;
+  void updateStatus() {
+    if (!status.active && magIsHealthy && !fusion->getMagDistDetected()) {
+      logger.debug("MagStatus Change SETTING TO ACTIVE | old status: active: %d, duration: %0.1f, recentCorrection: %0.1f", status.active, status.duration, status.recentCorrection);
+      status.active = true;
+      statusLastChangeTS = millis();
+    } else if (status.active && (!magIsHealthy || fusion->getMagDistDetected()) && status.duration > 3) {
+      logger.debug("MagStatus Change SETTING TO INACTIVE | old status: active: %d, duration: %0.1f, recentCorrection: %0.1f", status.active, status.duration, status.recentCorrection);
+      timeActive += status.duration;
+      status.active = false;
+      statusLastChangeTS = millis();
+    }
+
+    // Rolling sum of the last params.MagStatusCorrectionSamples correction rates
+    status.recentCorrection = magCorrectionMultiplier * status.recentCorrection + fusion->getState().lastMagCorrAngularRate;
+    status.duration = (millis() - statusLastChangeTS) / 1000.0f;
   }
 
   std::optional<std::function<void(MagCalibration, long)>> newBestCallback;
@@ -312,6 +345,7 @@ private:
       const VQFState& vqfState = fusion->getState();
       float disturbedFor = (millis() - lastHealthyTime) / 1000.0f;
       logger.debug("[%d] VQF: Healthy Duration: %0.2f (current accepted mag field: norm %0.4f, dip %0.4f) Disturbed duration: %0.1f (candidate mag field: time %0.2f, norm %0.4f, dip %0.4f)", sampleNumber, vqfState.magUndisturbedT, vqfState.magRefNorm, vqfState.magRefDip, disturbedFor, vqfState.magCandidateT, vqfState.magCandidateNorm, vqfState.magCandidateDip);
+      logger.debug("MagStatus - active: %d, duration: %0.1f, recentCorrection: %0.1f, avgMovment: %0.1f", status.active, status.duration, status.recentCorrection, magAvgMovement/magMoveSampleAvg);
       logger.debug("Active calibration health: %0.3f (magIsHealthy %d, magHealthyTime: %0.2f), Candidate calibration health: %0.3f", activeHealth.getHealth(), magIsHealthy, (millis() - magHealthySince) / 1000.0f, candidateHealth.getHealth());
       
       // log current best

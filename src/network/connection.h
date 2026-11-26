@@ -98,7 +98,11 @@ public:
 	// PACKET_FLEX_DATA 26
 	void sendFlexData(uint8_t sensorId, float flexLevel);
 
+	// PACKET_MAG_STATUS
+	void sendMagStatus(uint8_t sensorId, bool active, float duration, float recentCorrection);
+
 #if ENABLE_INSPECTION
+	// PACKET_INSPECTION 105
 	void sendInspectionRawIMUData(
 		uint8_t sensorId,
 		int16_t rX,

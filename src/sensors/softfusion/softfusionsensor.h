@@ -87,6 +87,13 @@ class SoftFusionSensor : public Sensor {
 	void sendData() final {
 		Sensor::sendData();
 		sendTempIfNeeded();
+
+		// update at 5hz
+		if (millis() - lastMagStatusUpdate > 0.2 * 1000) {
+			lastMagStatusUpdate = millis();
+			SlimeVR::Sensors::RuntimeCalibration::MagStatus status = calibrator.getMagStatus();
+			networkConnection.sendMagStatus(this->sensorId, status.active, status.duration, status.recentCorrection);
+		}
 	}
 
 	void sendTempIfNeeded() {
@@ -150,6 +157,7 @@ class SoftFusionSensor : public Sensor {
 		}
 	}
 
+	uint64_t lastMagStatusUpdate = 0;
 	void processMagSample(const uint8_t* sample, const sensor_real_t timeDelta) {
 		float scaledSample[3];
 		magDriver.scaleMagSample(sample, scaledSample); // scale to μT

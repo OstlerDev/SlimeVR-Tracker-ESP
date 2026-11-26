@@ -249,6 +249,12 @@ public:
 		return false; // mag only implemented in Runtime Calibration
 	}
 
+	SlimeVR::Sensors::RuntimeCalibration::MagStatus getMagStatus() {
+		// mag only implemented in Runtime Calibration
+		SlimeVR::Sensors::RuntimeCalibration::MagStatus magStatus{};
+		return magStatus;
+	}
+
 	float getTempTimestep() final { return calibration.T_Ts; }
 
 	const uint8_t* getMotionlessCalibrationData() final {

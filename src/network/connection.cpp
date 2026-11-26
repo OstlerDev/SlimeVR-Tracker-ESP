@@ -420,6 +420,20 @@ void Connection::sendFlexData(uint8_t sensorId, float flexLevel) {
 	));
 }
 
+// PACKET_MAG_STATUS 32
+void Connection::sendMagStatus(uint8_t sensorId, bool active, float duration, float recentCorrection) {
+	MUST(m_Connected);
+	MUST(sendPacket(
+		SendPacketType::MagStatus,
+		MagStatusPacket{
+			.sensorId = sensorId,
+			.duration = active ? duration : -duration,
+			.recentCorrection = recentCorrection,
+		}
+	));
+}
+
+// PACKET_INSPECTION 105
 #if ENABLE_INSPECTION
 void Connection::sendInspectionRawIMUData(
 	uint8_t sensorId,

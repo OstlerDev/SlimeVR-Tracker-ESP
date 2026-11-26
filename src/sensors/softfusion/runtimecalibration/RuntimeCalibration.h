@@ -252,6 +252,8 @@ public:
 
 	bool magHealthy() { return magCalibrator.magHealthy(); }
 
+	MagStatus getMagStatus() { return magCalibrator.getMagStatus(); }
+
 	float getTempTimestep() final { return activeCalibration.T_Ts; }
 
 	const uint8_t* getMotionlessCalibrationData() final {

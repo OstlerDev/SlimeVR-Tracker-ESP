@@ -55,6 +55,7 @@ enum class SendPacketType : uint8_t {
 	AcknowledgeConfigChange = 24,
 	FlexData = 26,
 	// PositionData = 27,
+	MagStatus = 32,
 	Bundle = 100,
 	Inspection = 105,
 };
@@ -181,6 +182,15 @@ struct AcknowledgeConfigChangePacket {
 struct FlexDataPacket {
 	uint8_t sensorId{};
 	BigEndian<float> flexLevel;
+};
+
+
+struct MagStatusPacket {
+	uint8_t sensorId{};
+	// positive if healthy, negative if unhealthy
+	BigEndian<float> duration; 
+	// past minute of corrections in degrees to display to the user
+	BigEndian<float> recentCorrection; 
 };
 
 struct IntRawImuDataInspectionPacket {
