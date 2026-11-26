@@ -25,6 +25,7 @@
 
 #include "magneto1.4.h"
 #include "vqf.h"
+#include "motioncalmagcal.h"
 #include "logging/Logger.h"
 
 #include <functional>
@@ -103,6 +104,12 @@ struct MagCalParams {
 
   /* The delay on startup before points will start to be collected */
   int StartupCollectionDelay = 120 * 1000;
+  /* How long until the sphere should be hardened to start rejecting values that deviate */
+  int StartupHardenDelay = 10 * 60 * 1000;
+  /* Number of improvement samples minimum before hardening */
+  int StartupHardenImprovementSamples = 125;
+  /* The health threshold for mag to be determined to be healthy, controls when 9D fusion is used */
+  float StartupHealthHardenThreshold = 0.5f;
   /* How frequently we should log all of the calibration data for debugging */
   int LogDumpFrequency = 30 * 1000;
 
@@ -582,8 +589,26 @@ private:
     return ((x1-x2)*(x1-x2)) + ((y1-y2)*(y1-y2)) + ((z1-z2)*(z1-z2));
   };
 
+  bool hasHardened = false;
+  bool isHardened() {
+    if (hasHardened) return true;
+    // wait to "harden" the calibration
+    if (
+      millis() - startTime < params.StartupHardenDelay 
+      && improvementSamples < params.StartupHardenImprovementSamples 
+      && candidateHealth.getHealth() < params.StartupHealthHardenThreshold
+      && Candidate.hm <= 40.0f
+    ) {
+      return false;
+    }
+    hasHardened = true;
+    return true;
+  }
+
   // experimental sanity check on soft-iron ellipsoid values (https://github.com/ysoldak/magcal/blob/master/magcal.go#L197)
   bool isGoodSoftCal(float M_Ainv[3][3]) {
+    if (!isHardened()) return false;
+
     // soft iron sanity checks
     float x = M_Ainv[0][0];
     float y = M_Ainv[1][1];
@@ -660,7 +685,7 @@ private:
       && activeHealth.getHealth() < candidateHealth.getHealth() 
       && candidateHealth.getHealth() > params.CandidateMinPromotionHealth
       && candidateHealth.getHealth() - activeHealth.getHealth() >= params.CandidateImprovementMinimum
-      && betterSoftCal
+      && betterSoftCal && isHardened()
     ) {
       logger.debug("Promoting Candidate Ellipsoid to Best Ellipsoid! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
       Best = Candidate;
@@ -745,7 +770,7 @@ private:
 
       recalculateMinDistance(); // recalculates distance
       if (countEmpty() == 0) {
-        runMagneto(true);
+        runCalibration(true);
         recalculateTrustScores();
         // force log first calibration
         logCalibration();
@@ -823,7 +848,7 @@ private:
       magCalibrateBM.after(); // stop before magneto
       magnetoCalculateBM.before();
 #endif
-      runMagneto();
+      runCalibration();
 #if BENCHMARK_MAG_CALIBRATOR
       magnetoCalculateBM.after();
 #endif
@@ -836,10 +861,8 @@ private:
     }
   };
 
-  // the hard iron bias/sphere center
-  int ellipsoidThrottleAttempts = 0;
-  void runMagneto(bool forceCreate = false) {
-    // throttle how frequently the magneto algorithm is run (points are still adjusted)
+  void runCalibration(bool forceCreate = false) {
+    // throttle how frequently the calibration algorithm is run (points are still adjusted)
     // defer until the next good point is found, don't schedule it.
     if (millis() - lastEllipsoidCreate <= params.ThrottleEllipsoidCalculation && !forceCreate) { 
       ellipsoidThrottleAttempts++;
@@ -849,6 +872,25 @@ private:
     ellipsoidThrottleAttempts = 0;
     lastEllipsoidCreate = millis();
 
+    // runMagneto();
+    run4ElementCalib();
+
+    // lower trust score now that we calibrated a new ellipsoid
+    // This will cause the trust score to go negative if frequent ellipsoid generation is occuring, this is intentional.
+    candidateHealth.setHealth(
+      std::max(
+        params.CandidateNewEllipsoidHealthMin, 
+        candidateHealth.getHealth() + params.CandidateNewEllipsoidHealthPenalty
+      )
+    );
+
+    emitNewCandidate();
+    logger.debug("Candidate Calibration created! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
+  }
+
+  // the hard iron bias/sphere center
+  int ellipsoidThrottleAttempts = 0;
+  void runMagneto() {
     // create a new calibration
     MagnetoCalibration* magneto = new MagnetoCalibration();
     for (int i = 0; i < SAMPLES_TOTAL; i++) {
@@ -868,18 +910,30 @@ private:
       Candidate.M_Ainv[1][i] = M_BAinv[2][i];
       Candidate.M_Ainv[2][i] = M_BAinv[3][i];
     }
+  }
 
-    // lower trust score now that we calibrated a new ellipsoid
-    // This will cause the trust score to go negative if frequent ellipsoid generation is occuring, this is intentional./
-    candidateHealth.setHealth(
-      std::max(
-        params.CandidateNewEllipsoidHealthMin, 
-        candidateHealth.getHealth() + params.CandidateNewEllipsoidHealthPenalty
-      )
-    );
+  // Utilizes the MotionCal magcal algorithm to perform linear math to identify a radius and offset for the hard-iron calibration
+  MotionCal_MagCalibration_t magcaler;
+  void run4ElementCalib() {
+    for (int i = 0; i < SAMPLES_TOTAL; i++) {
+      if (x_vec[i] == 0 && y_vec[i] == 0 && z_vec[i] == 0) {
+        magcaler.valid[i] = 0;
+      } else {
+        magcaler.valid[i] = 1;
+      }
+      magcaler.BpFast[0][i] = x_vec[i];
+      magcaler.BpFast[1][i] = y_vec[i];
+      magcaler.BpFast[2][i] = z_vec[i];
+    }
 
-    emitNewCandidate();
-    logger.debug("Candidate Ellipoid calibrated! Active Health: %0.3f, Candidate Health: %0.3f", activeHealth.getHealth(), candidateHealth.getHealth());
+    // run solver
+    fUpdateCalibration4INV(&magcaler);
+
+    // set candidate to new "trial" outputs
+    Candidate.M_Bias[0] = magcaler.trV[0];
+    Candidate.M_Bias[1] = magcaler.trV[1];
+    Candidate.M_Bias[2] = magcaler.trV[2];
+    Candidate.hm = magcaler.trB;
   }
 };
 
